@@ -94,6 +94,33 @@ feature -- Factories
 			on_backend: Result.backend = backend
 		end
 
+	from_memory (a_source: POINTER; a_dims: ARRAY [INTEGER]): TENSOR
+			-- Tensor of the `product (a_dims)' REAL_32 values at `a_source' (host memory, row-major,
+			-- copied): for loaders that decode whole blocks in C (checkpoints, quantized archives).
+		require
+			source: a_source /= default_pointer
+			valid_dims: valid_dims (a_dims)
+		local
+			l_storage: TENSOR_STORAGE
+			l_values: ARRAY [REAL_32]
+			n: INTEGER
+		do
+			n := product (a_dims)
+			l_storage := backend.new_storage (n)
+			if attached {CPU_STORAGE} l_storage as l_cpu then
+				l_cpu.address.memory_copy (a_source, n * {PLATFORM}.real_32_bytes)
+			else
+				create l_values.make_filled (0.0, 1, n)
+				l_values.area.base_address.memory_copy (a_source, n * {PLATFORM}.real_32_bytes)
+				backend.upload (l_values, l_storage)
+			end
+			create Result.make_leaf (create {TENSOR_SHAPE}.make (a_dims), l_storage, backend, False)
+		ensure
+			untracked: not Result.is_tracked
+			on_backend: Result.backend = backend
+			counted: Result.shape.count = product (a_dims)
+		end
+
 	parameter (a_tensor: TENSOR): TENSOR
 			-- A leaf copy of `a_tensor' that requires gradients.
 		require

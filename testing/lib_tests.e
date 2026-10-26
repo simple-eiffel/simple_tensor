@@ -55,6 +55,28 @@ feature -- Shape and storage
 			assert ("fits rejects 2^31 elements", not a.fits (<<65536, 32768>>))
 		end
 
+	test_from_memory
+			-- `from_memory' copies host REAL_32 values, row-major, onto the CPU backend and the oracle;
+			-- later changes to the source don't leak in.
+		local
+			l_block: MANAGED_POINTER
+			c, o: TENSOR
+			i: INTEGER
+		do
+			create l_block.make (6 * {PLATFORM}.real_32_bytes)
+			from i := 0 until i = 6 loop
+				l_block.put_real_32 ((i * 1.5 - 2.0).truncated_to_real, i * {PLATFORM}.real_32_bytes)
+				i := i + 1
+			end
+			c := (create {SIMPLE_TENSOR}.make).from_memory (l_block.item, <<2, 3>>)
+			o := oracle.from_memory (l_block.item, <<2, 3>>)
+			l_block.put_real_32 (99.0, 0)
+			assert ("cpu shape", c.shape ~ create {TENSOR_SHAPE}.make (<<2, 3>>))
+			assert ("cpu values", c.item (0) = -2.0 and c.item (1) = -0.5 and c.item (5) = 5.5)
+			assert ("oracle values", o.item (0) = -2.0 and o.item (4) = 4.0 and o.item (5) = 5.5)
+			assert ("cpu backend", c.backend.kind = c.backend.Cpu_backend_kind)
+		end
+
 	test_storage_budget_collects
 			-- Over-budget allocation forces a collection (intent-v2 Q7, spike S-4);
 			-- release gives the block back; INDEX_TENSOR range queries.

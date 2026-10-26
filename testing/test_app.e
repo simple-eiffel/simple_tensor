@@ -21,6 +21,7 @@ feature {NONE} -- Initialization
 			-- Shape and storage
 			run (agent t.test_shape_basics, "shape basics")
 			run (agent t.test_shape_broadcast, "shape broadcast rules")
+			run (agent t.test_from_memory, "from_memory copies host values onto any backend")
 			run (agent t.test_storage_budget_collects, "storage budget forces a collection")
 			-- Ops: gradient checks (REFERENCE) and twin parity (CPU vs REFERENCE)
 			run (agent t.test_gradient_checks_all_primitives, "gradient check: every primitive")
