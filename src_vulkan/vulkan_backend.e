@@ -48,9 +48,13 @@ feature {NONE} -- Initialization
 			create programs.make (32)
 			create kernels
 			create shaderc.make
+			wide_tiles := True
+			split_k := True
 		ensure
 			context_set: context = a_context
 			no_fallbacks_yet: fallback_counts.is_empty
+			wide_tiles_on: wide_tiles
+			split_k_on: split_k
 		end
 
 feature -- Identity
@@ -281,15 +285,73 @@ feature -- Kernels: reductions
 feature -- Kernels: linear algebra
 
 	matmul (a, b, a_out: TENSOR_STORAGE; a_batch, a_m, a_k, a_n: INTEGER; a_ta, a_tb, a_b_shared: BOOLEAN)
+			-- Three routes: split-K for one long-K product (a weight gradient, K = tokens,
+			-- whose few output tiles cannot fill the GPU), 128 x 128 tiles for large
+			-- products, 64 x 64 tiles otherwise.
 		local
-			p: VULKAN_PUSH_BLOCK
+			p, q: VULKAN_PUSH_BLOCK
+			l_groups, l_slices, l_kc: INTEGER
+			l_part: VULKAN_DEVICE_BUFFER
 		do
+			l_groups := ((a_n + 63) // 64) * ((a_m + 63) // 64)
+			if split_k and a_batch = 1 and a_k >= 512 and a_k >= 4 * a_m.max (a_n) and l_groups < Split_target_groups then
+				l_slices := (Split_target_groups // l_groups).max (2).min (a_k // 256)
+				l_kc := ((a_k + l_slices - 1) // l_slices + 15) // 16 * 16
+				l_slices := (a_k + l_kc - 1) // l_kc
+			end
 			create p.make
-			p.address (addr (a)); p.address (addr (b)); p.address (addr (a_out))
+			p.address (addr (a)); p.address (addr (b))
+			if l_slices >= 2 then
+				l_part := scratch (l_slices.to_integer_64 * a_m * a_n * 4)
+				p.address (l_part.address)
+			else
+				p.address (addr (a_out))
+			end
 			p.natural (a_m); p.natural (a_k); p.natural (a_n)
 			p.natural (a_ta.to_integer); p.natural (a_tb.to_integer); p.natural (a_b_shared.to_integer)
-			run_groups ("matmul", p, (a_n + 63) // 64, (a_m + 63) // 64, a_batch)
+			if l_slices >= 2 and then attached l_part as l_p then
+				p.natural (l_kc)
+				run_groups ("matmul", p, (a_n + 63) // 64, (a_m + 63) // 64, l_slices)
+				create q.make
+				q.address (l_p.address); q.address (addr (a_out)); q.natural (a_m * a_n); q.natural (l_slices)
+				run ("sum_slices", q, a_m * a_n)
+					-- Back to the pool now (dispatches in a batch are barrier-separated, so a
+					-- later product may reuse it); left to the collector, `dispose' would flush.
+				l_p.recycle
+			else
+				p.natural (0)
+				if wide_tiles and a_m >= 128 and a_n >= 128 then
+					run_groups ("matmul_128", p, (a_n + 127) // 128, (a_m + 127) // 128, a_batch)
+				else
+					run_groups ("matmul", p, (a_n + 63) // 64, (a_m + 63) // 64, a_batch)
+				end
+			end
 			gpu (a_out).invalidate
+		end
+
+	Split_target_groups: INTEGER = 512
+			-- Workgroups a split-K product aims for (several per SM on a 70-SM GPU).
+
+	split_k: BOOLEAN
+			-- Are long-K products split across K slices?
+
+	set_split_k (a_on: BOOLEAN)
+			-- Split (or stop splitting) long-K products across K slices.
+		do
+			split_k := a_on
+		ensure
+			set: split_k = a_on
+		end
+
+	wide_tiles: BOOLEAN
+			-- Do products of at least 128 x 128 use the 128 x 128 tile kernel?
+
+	set_wide_tiles (a_on: BOOLEAN)
+			-- Use (or stop using) the 128 x 128 tile kernel for large products.
+		do
+			wide_tiles := a_on
+		ensure
+			set: wide_tiles = a_on
 		end
 
 feature -- Kernels: neural
@@ -603,6 +665,16 @@ feature -- Profiling
 			across programs as pr loop
 				pr.reset_profile
 			end
+		end
+
+	profiled_ms (a_kernel: STRING_8): REAL_64
+			-- GPU time gathered so far for the kernel named `a_kernel' (0 when it has not run).
+		do
+			if attached programs.item (a_kernel) as pr then
+				Result := pr.profiled_ms
+			end
+		ensure
+			non_negative: Result >= 0.0
 		end
 
 	profile_report: STRING_8

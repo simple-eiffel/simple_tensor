@@ -57,6 +57,8 @@ feature -- GPU tests
 			t.compare_named ("matmul tb", agent twin_matmul (?, False, True, False))
 			t.compare_named ("matmul batched shared B", agent twin_matmul (?, False, False, True))
 			t.compare_named ("matmul multi-tile, ragged edges, all flags, batched", agent twin_matmul_large)
+			t.compare_named ("matmul 128-wide tiles, ragged edges, all flags, batched", agent twin_matmul_wide)
+			t.compare_named ("matmul split-K, ragged slices, all flags", agent twin_matmul_split_k)
 			t.compare_named ("softmax", agent twin_softmax (?, False))
 			t.compare_named ("log_softmax", agent twin_softmax (?, True))
 			t.compare_named ("gather_rows + scatter_add_rows", agent twin_gather_scatter)
@@ -257,6 +259,47 @@ feature {NONE} -- Cold-kernel twin cases
 				.concatenated (at.matmul_transposed (bt, True, True).reshaped (<<6300>>), 1)
 				.concatenated (ab.matmul (bb).reshaped (<<18900>>), 1)
 				.concatenated (ab.matmul (b).reshaped (<<18900>>), 1)
+		end
+
+	twin_matmul_wide (f: SIMPLE_TENSOR): TENSOR
+			-- Sizes that take the 128 x 128 kernel (M, N >= 128) and cross its tiles raggedly
+			-- (260, 200), with K = 75 ragged against its 8-deep K steps; every transpose flag,
+			-- batched with two operands and with a shared right-hand side.
+		local
+			a, b, at, bt, ab, bb: TENSOR
+		do
+			a := seeded (f, <<260, 75>>, -1.0, 1.0, 120)
+			b := seeded (f, <<75, 200>>, -1.0, 1.0, 121)
+			at := seeded (f, <<75, 260>>, -1.0, 1.0, 122)
+			bt := seeded (f, <<200, 75>>, -1.0, 1.0, 123)
+			ab := seeded (f, <<2, 260, 75>>, -1.0, 1.0, 124)
+			bb := seeded (f, <<2, 75, 200>>, -1.0, 1.0, 125)
+			Result := a.matmul (b).reshaped (<<52000>>)
+				.concatenated (at.matmul_transposed (b, True, False).reshaped (<<52000>>), 1)
+				.concatenated (a.matmul_transposed (bt, False, True).reshaped (<<52000>>), 1)
+				.concatenated (at.matmul_transposed (bt, True, True).reshaped (<<52000>>), 1)
+				.concatenated (ab.matmul (bb).reshaped (<<104000>>), 1)
+				.concatenated (ab.matmul (b).reshaped (<<104000>>), 1)
+		end
+
+	twin_matmul_split_k (f: SIMPLE_TENSOR): TENSOR
+			-- Long-K products that VULKAN_BACKEND splits across K slices: 40 x 1100 x 70
+			-- (4 slices of 288, the last 236 deep) under every transpose flag, and a weight-
+			-- gradient shape, 316 x 2000 x 384 with A transposed (7 slices).
+		local
+			a, b, at, bt, g, x: TENSOR
+		do
+			a := seeded (f, <<40, 1100>>, -1.0, 1.0, 130)
+			b := seeded (f, <<1100, 70>>, -1.0, 1.0, 131)
+			at := seeded (f, <<1100, 40>>, -1.0, 1.0, 132)
+			bt := seeded (f, <<70, 1100>>, -1.0, 1.0, 133)
+			g := seeded (f, <<2000, 316>>, -1.0, 1.0, 134)
+			x := seeded (f, <<2000, 384>>, -1.0, 1.0, 135)
+			Result := a.matmul (b).reshaped (<<2800>>)
+				.concatenated (at.matmul_transposed (b, True, False).reshaped (<<2800>>), 1)
+				.concatenated (a.matmul_transposed (bt, False, True).reshaped (<<2800>>), 1)
+				.concatenated (at.matmul_transposed (bt, True, True).reshaped (<<2800>>), 1)
+				.concatenated (g.matmul_transposed (x, True, False).reshaped (<<121344>>), 1)
 		end
 
 	twin_global_norm (f: SIMPLE_TENSOR): TENSOR

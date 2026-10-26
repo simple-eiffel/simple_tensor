@@ -19,7 +19,9 @@ feature -- Source
 		require
 			known: has (a_name)
 		do
-			if a_name.same_string ("matmul_16") then
+			if a_name.same_string ("matmul_128") then
+				Result := Matmul_128
+			elseif a_name.same_string ("matmul_16") then
 				Result := Matmul_16
 			elseif a_name.same_string ("matmul") then
 				Result := Matmul
@@ -32,7 +34,7 @@ feature -- Source
 
 	has (a_name: STRING_8): BOOLEAN
 		do
-			Result := a_name.same_string ("matmul") or a_name.same_string ("matmul_16") or bodies.has (a_name)
+			Result := a_name.same_string ("matmul") or a_name.same_string ("matmul_16") or a_name.same_string ("matmul_128") or bodies.has (a_name)
 		end
 
 feature {NONE} -- Shared GLSL
@@ -61,16 +63,20 @@ feature {NONE} -- Shared GLSL
 		#extension GL_EXT_buffer_reference : require
 		layout(local_size_x = 16, local_size_y = 16) in;
 		layout(buffer_reference, std430, buffer_reference_align = 4) buffer F { float v[]; };
-		layout(push_constant) uniform P { F a; F b; F c; uint M; uint K; uint N; uint ta; uint tb; uint sh; } p;
+		layout(push_constant) uniform P { F a; F b; F c; uint M; uint K; uint N; uint ta; uint tb; uint sh; uint kc; } p;
 		// 64 x 64 output tile per group, 16 x 16 threads, each thread a 4 x 4 block of
 		// rows ty + 16i and columns tx + 16j (strided: conflict-free shared reads, coalesced
 		// writes). K advances 16 at a time through shared tiles As[k][m], Bs[k][n].
+		// Split-K (kc > 0, one unbatched product): group z takes K slice [z kc, (z + 1) kc)
+		// and writes its partial product at c + z M N; sum_slices adds the partials.
 		shared float As[16][64];
 		shared float Bs[16][64];
 		void main() {
 			uint z = gl_WorkGroupID.z;
-			uint ba = z * p.M * p.K;
-			uint bb = (p.sh != 0u) ? 0u : z * p.K * p.N;
+			uint ks = (p.kc != 0u) ? z : 0u; uint zb = (p.kc != 0u) ? 0u : z;
+			uint k0 = ks * p.kc; uint k1 = (p.kc != 0u) ? min(p.K, k0 + p.kc) : p.K;
+			uint ba = zb * p.M * p.K;
+			uint bb = (p.sh != 0u) ? 0u : zb * p.K * p.N;
 			uint bc = z * p.M * p.N;
 			uint tx = gl_LocalInvocationID.x;
 			uint ty = gl_LocalInvocationID.y;
@@ -79,20 +85,20 @@ feature {NONE} -- Shared GLSL
 			uint col0 = gl_WorkGroupID.x * 64u;
 			float acc[4][4];
 			for (uint i = 0u; i < 4u; i++) for (uint j = 0u; j < 4u; j++) acc[i][j] = 0.0;
-			for (uint t = 0u; t < p.K; t += 16u) {
+			for (uint t = k0; t < k1; t += 16u) {
 				for (uint q = 0u; q < 4u; q++) {
 					uint e = tid + 256u * q;
 					uint mm; uint kk;
 					if (p.ta != 0u) { kk = e >> 6u; mm = e & 63u; } else { mm = e >> 4u; kk = e & 15u; }
 					uint gm = row0 + mm; uint gk = t + kk;
 					float av = 0.0;
-					if (gm < p.M && gk < p.K) av = (p.ta != 0u) ? p.a.v[ba + gk * p.M + gm] : p.a.v[ba + gm * p.K + gk];
+					if (gm < p.M && gk < k1) av = (p.ta != 0u) ? p.a.v[ba + gk * p.M + gm] : p.a.v[ba + gm * p.K + gk];
 					As[kk][mm] = av;
 					uint nn; uint kb;
 					if (p.tb != 0u) { nn = e >> 4u; kb = e & 15u; } else { kb = e >> 6u; nn = e & 63u; }
 					uint gn = col0 + nn; uint gkb = t + kb;
 					float bv = 0.0;
-					if (gn < p.N && gkb < p.K) bv = (p.tb != 0u) ? p.b.v[bb + gn * p.K + gkb] : p.b.v[bb + gkb * p.N + gn];
+					if (gn < p.N && gkb < k1) bv = (p.tb != 0u) ? p.b.v[bb + gn * p.K + gkb] : p.b.v[bb + gkb * p.N + gn];
 					Bs[kb][nn] = bv;
 				}
 				barrier();
@@ -108,6 +114,67 @@ feature {NONE} -- Shared GLSL
 				uint r = row0 + ty + 16u * i;
 				if (r < p.M) {
 					for (uint j = 0u; j < 4u; j++) {
+						uint cc = col0 + tx + 16u * j;
+						if (cc < p.N) p.c.v[bc + r * p.N + cc] = acc[i][j];
+					}
+				}
+			}
+		}
+	]"
+
+	Matmul_128: STRING_8 = "[
+		#version 460
+		#extension GL_EXT_buffer_reference : require
+		layout(local_size_x = 16, local_size_y = 16) in;
+		layout(buffer_reference, std430, buffer_reference_align = 4) buffer F { float v[]; };
+		layout(push_constant) uniform P { F a; F b; F c; uint M; uint K; uint N; uint ta; uint tb; uint sh; uint kc; } p;
+		// 128 x 128 output tile per group, K advancing 8 at a time; 16 x 16 threads, each an
+		// 8 x 8 register block on strided rows ty + 16i and columns tx + 16j.
+		shared float As[8][128];
+		shared float Bs[8][128];
+		void main() {
+			uint z = gl_WorkGroupID.z;
+			uint ks = (p.kc != 0u) ? z : 0u; uint zb = (p.kc != 0u) ? 0u : z;
+			uint k0 = ks * p.kc; uint k1 = (p.kc != 0u) ? min(p.K, k0 + p.kc) : p.K;
+			uint ba = zb * p.M * p.K;
+			uint bb = (p.sh != 0u) ? 0u : zb * p.K * p.N;
+			uint bc = z * p.M * p.N;
+			uint tx = gl_LocalInvocationID.x;
+			uint ty = gl_LocalInvocationID.y;
+			uint tid = ty * 16u + tx;
+			uint row0 = gl_WorkGroupID.y * 128u;
+			uint col0 = gl_WorkGroupID.x * 128u;
+			float acc[8][8];
+			for (uint i = 0u; i < 8u; i++) for (uint j = 0u; j < 8u; j++) acc[i][j] = 0.0;
+			for (uint t = k0; t < k1; t += 8u) {
+				for (uint q = 0u; q < 4u; q++) {
+					uint e = tid + 256u * q;
+					uint mm; uint kk;
+					if (p.ta != 0u) { kk = e >> 7u; mm = e & 127u; } else { mm = e >> 3u; kk = e & 7u; }
+					uint gm = row0 + mm; uint gk = t + kk;
+					float av = 0.0;
+					if (gm < p.M && gk < k1) av = (p.ta != 0u) ? p.a.v[ba + gk * p.M + gm] : p.a.v[ba + gm * p.K + gk];
+					As[kk][mm] = av;
+					uint nn; uint kb;
+					if (p.tb != 0u) { nn = e >> 3u; kb = e & 7u; } else { kb = e >> 7u; nn = e & 127u; }
+					uint gn = col0 + nn; uint gkb = t + kb;
+					float bv = 0.0;
+					if (gn < p.N && gkb < k1) bv = (p.tb != 0u) ? p.b.v[bb + gn * p.K + gkb] : p.b.v[bb + gkb * p.N + gn];
+					Bs[kb][nn] = bv;
+				}
+				barrier();
+				for (uint k = 0u; k < 8u; k++) {
+					float ar[8]; float br[8];
+					for (uint i = 0u; i < 8u; i++) ar[i] = As[k][ty + 16u * i];
+					for (uint j = 0u; j < 8u; j++) br[j] = Bs[k][tx + 16u * j];
+					for (uint i = 0u; i < 8u; i++) for (uint j = 0u; j < 8u; j++) acc[i][j] += ar[i] * br[j];
+				}
+				barrier();
+			}
+			for (uint i = 0u; i < 8u; i++) {
+				uint r = row0 + ty + 16u * i;
+				if (r < p.M) {
+					for (uint j = 0u; j < 8u; j++) {
 						uint cc = col0 + tx + 16u * j;
 						if (cc < p.N) p.c.v[bc + r * p.N + cc] = acc[i][j];
 					}
@@ -156,6 +223,7 @@ feature {NONE} -- Kernel bodies
 	bodies: HASH_TABLE [STRING_8, STRING_8]
 		once
 			create Result.make (32)
+			Result.put (Sum_slices, "sum_slices")
 			Result.put (Binary_same, "binary_same")
 			Result.put (Binary_broadcast, "binary_broadcast")
 			Result.put (Unary, "unary")
@@ -304,6 +372,16 @@ feature {NONE} -- Kernel bodies
 				v = (p.all_keep != 0u || word(i) < p.thr) ? p.keep_value : 0.0;
 			}
 			p.o.v[i] = v;
+		}
+	]"
+
+	Sum_slices: STRING_8 = "[
+		layout(push_constant) uniform P { F part; F o; uint n; uint s; } p;
+		void main() {
+			uint i = gid(); if (i >= p.n) return;
+			float acc = 0.0;
+			for (uint j = 0u; j < p.s; j++) acc += p.part.v[j * p.n + i];
+			p.o.v[i] = acc;
 		}
 	]"
 

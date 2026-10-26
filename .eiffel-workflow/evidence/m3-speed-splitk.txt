@@ -1,0 +1,43 @@
+# M3 speed evidence: 128 x 128 tiles and split-K matmul
+# Project: D:\prod\simple_tensor (src_vulkan)
+# Date: 2026-10-26
+# Machine: NVIDIA GeForce RTX 5070 Ti; bench = simple_tensor_vulkan_bench (lean); trainer = rixgpt_trainer (lean)
+
+## Correctness
+GPU suite (simple_tensor_vulkan_tests, DbC): 6 passed, 0 failed, host fallbacks 0.
+New twins (GPU vs CPU oracle, all transpose flags):
+- "matmul 128-wide tiles, ragged edges, all flags, batched" (260 x 75 x 200, batched 2, shared B)
+- "matmul split-K, ragged slices, all flags" (40 x 1100 x 70 in 4 slices of 288 / last 236; 316 x 2000 x 384 ta in 7 slices)
+Worst relative error over every hot kernel: 2.47e-05 (split-K, K = 2000), inside 1e-4.
+simple_rixgpt_train_tests (clean rebuild): 6 passed, 0 failed (GPU logit parity 8.4e-6).
+
+## 128 x 128 tiles against 64 x 64 (GPU kernel time, same work: 21 x 8192x384x1536 + 21 x 2048^3)
+64-tile  ("matmul"):     66.9 ms
+128-tile ("matmul_128"): 60.0 ms   (about 10% faster; about 9.4 TFLOP/s on large shapes)
+Note: wall-clock "matmul through TENSOR" figures (700-2900 GFLOP/s) measure per-call overhead
+(new 16-50 MB outputs per call), not the kernel; use the profiled kernel time.
+
+## Split-K for long-K products (weight gradients, K = 8192 tokens per micro-batch)
+Rule: unbatched, K >= 512, K >= 4 max(M, N), fewer than 512 64-tile groups -> slices to reach
+about 512 groups (at most K / 256), K chunk a multiple of 16, partials summed by sum_slices.
+
+shape (batch x MxKxN, flags)        before split-K           after split-K
+1 x 1152x8192x384 ta                4.848 ms  1.50 TFLOP/s   1.063 ms  6.82 TFLOP/s
+1 x 1536x8192x384 ta                4.815 ms  2.01 TFLOP/s   1.509 ms  6.41 TFLOP/s
+1 x 384x8192x1536 ta                3.858 ms  2.51 TFLOP/s   1.318 ms  7.33 TFLOP/s
+1 x 316x8192x384 ta                 2.544 ms  0.78 TFLOP/s   0.222 ms  8.94 TFLOP/s
+(other RixGPT shapes unchanged by split-K: 5-10 TFLOP/s; kernel time excludes sum_slices,
+ which costs 0.2% of a training step)
+
+## RixGPT trainer, --profile 10 (64 x 256, 2 micro-batches)
+before (64-tile only, no split-K): about 600-660 ms/step wall; GPU 445 ms/step, matmul 300 ms/step
+after:                              334 ms/step wall;          GPU 245 ms/step, matmul 168 ms/step
+GPU kernel time over 10 steps (2452.7 ms total):
+  matmul_128 1022.4 ms 41.7%, matmul 659.6 ms 26.9%, binary_same 223.3 ms 9.1%, reduce_to 114.5 ms 4.7%,
+  binary_broadcast 73.6 ms 3.0%, causal_softmax 56.7 ms 2.3%, layer_norm 54.8 ms 2.2%, sum_slices 4.3 ms 0.2%
+
+## Remaining gap
+Wall 334 ms against GPU 245 ms: about 90 ms/step outside the GPU (host recording, syncs).
+PyTorch (bf16 tensor cores): 38 ms/step. Next lever: cooperative-matrix (tensor-core) matmul.
+
+# Status: PASS

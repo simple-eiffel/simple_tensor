@@ -10,6 +10,12 @@
 - **Fused ops (memory):** `causal_softmax`, `layer_norm`, `linear` (bias in place), `dropped` (mask regenerated in backward, never stored).
   - Each is held to its primitive composition by a test, values and gradients, and passes gradient checks.
 - **RixGPT trained in Eiffel (M2 gate):** step 500 reaches train 1.510 / val 1.242, against PyTorch's 1.511 / 1.201 (simple_rixgpt `simple_rixgpt_train.ecf`).
+- **M3 gate:** the full 5,000 steps end at train 0.727 / val 0.807, against PyTorch's 0.724 / 0.782 (`.eiffel-workflow/evidence/m3-gate-rixgpt-5000.txt`).
+- **Matmul speed:** a RixGPT step went from about 600 ms to 334 ms (`.eiffel-workflow/evidence/m3-speed-splitk.txt`).
+  - 128×128 register tiles (`matmul_128`) for products of at least 128×128: about 10% faster than 64×64.
+  - Split-K for one long-K product (the weight gradients, K = tokens): K slices into partials, then `sum_slices`. Those products went from 0.8–2.5 to 6.4–8.9 TFLOP/s.
+  - `set_wide_tiles` and `set_split_k` switch each route off for A/B runs; `profiled_ms` gives one kernel's GPU time.
+  - New twins: 128-wide tiles and split-K with ragged slices, every transpose flag.
 - **Fixes:**
   - VULKAN_STORAGE.dispose called a routine on another object, which may already be reclaimed; it now uses its own raw handles.
   - A failed GPU allocation used to go unnoticed; it now retries after a collection, then raises a clear error.
