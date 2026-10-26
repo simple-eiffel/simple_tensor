@@ -1,0 +1,5 @@
+S-5 on NVIDIA GeForce RTX 5070 Ti
+(a) legacy  1,000 dispatches: 74 ms, x[0] = 1000 (ok True)
+(a) batched 1,000 dispatches: 6 ms, x[0] = 1000 (ok True)
+(b) matmul 256x768x768: 0 ms/dispatch avg, 3019 GFLOP/s, worst rel err 1.0376796126365662e-05 (ok True)
+(b) matmul 2048x2048x2048: 4 ms/dispatch avg, 3616 GFLOP/s, worst rel err 7.6935975812375546e-06 (ok True)

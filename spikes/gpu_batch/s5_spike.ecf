@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<system xmlns="http://www.eiffel.com/developers/xml/configuration/22" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.eiffel.com/developers/xml/configuration/22 http://www.eiffel.com/developers/xml/configuration/22/configuration.xsd" name="s5_spike" uuid="5F1C2D3E-7A8B-4C9D-8E0F-1A2B3C4D5E6F">
+	<target name="s5_spike">
+		<root class="S5_APP" feature="make"/>
+		<option warning="error" void_safety="all">
+			<assertions precondition="true" postcondition="false" invariant="false"/>
+		</option>
+		<setting name="total_order_on_reals" value="true"/>
+		<setting name="console_application" value="true"/>
+		<capability>
+			<concurrency support="none"/>
+			<void_safety support="all"/>
+		</capability>
+		<library name="base" location="$ISE_LIBRARY/library/base/base.ecf"/>
+		<library name="simple_vulkan" location="$SIMPLE_EIFFEL/simple_vulkan/simple_vulkan.ecf"/>
+		<library name="simple_shaderc" location="$SIMPLE_EIFFEL/simple_shaderc/simple_shaderc.ecf"/>
+		<cluster name="spike" location="./"/>
+	</target>
+</system>
