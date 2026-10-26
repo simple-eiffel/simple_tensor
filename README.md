@@ -2,7 +2,7 @@
 
 Tensors, automatic gradients, optimizers and training for Eiffel. Everything is Eiffel: the hot loops are C inline inside Eiffel classes, and every fast kernel has a plain-Eiffel twin that checks it. No Python or outside ML library at run time.
 
-**Status (2026-10-26):** M1 (CPU) and M3b (GPU backend) are complete. M2 passed its gate: RixGPT trained from scratch in Eiffel on the GPU reaches train 1.510 and val 1.242 at step 500, against PyTorch's 1.511 and 1.201 (the gate is 1.201 ± 0.05). The full 5,000-step run, the M3 gate, is in progress.
+**Status (2026-10-26):** M1 (CPU), M2 and M3 (GPU) are complete. RixGPT, trained from scratch in Eiffel on the GPU, reaches train 1.510 and val 1.242 at step 500, against PyTorch's 1.511 and 1.201 (the M2 gate). The full 5,000 steps end at val 0.807 in f32 and 0.823 with mixed precision, against PyTorch's 0.782 (the M3 gate, ± 0.05). A step takes 317 ms in f32, or 269 ms on the tensor cores.
 
 ## Installation
 
@@ -99,7 +99,13 @@ create f.make_with_backend (create {VULKAN_BACKEND}.make)   -- the rest of the c
   - Buffers are addressed straight from the shaders, so no descriptor sets are needed.
   - Memory comes from a device-buffer pool. The collector recycles dead tensors into it without waiting on the GPU.
 - **Correctness:** every kernel, hot and cold, passes twin parity against REFERENCE_BACKEND (worst relative error 3.6e-7). Dropout masks drawn on the GPU are bit-identical to the oracle's, and training runs end to end on the GPU.
-- **Speed (RTX 5070 Ti, lean build):** a training step of a 4096×768 → 3072 → 768 MLP block takes 56 ms on the GPU, against 4,184 ms single-thread on the CPU.
+- **Speed (RTX 5070 Ti, lean build):** a training step of a 4096×768 → 3072 → 768 MLP block takes 21 ms on the GPU, against about 4,300 ms single-thread on the CPU.
+  - A RixGPT training step (64 × 256 tokens, 10.9M parameters) takes 317 ms, or 269 ms with mixed precision. PyTorch takes 38 ms.
+  - Matmul: 64×64 or 128×128 register tiles, plus split-K for long-K products such as the weight gradients. On the RixGPT shapes they reach 6–9 TFLOP/s in f32.
+  - Recording is submitted asynchronously (simple_vulkan 0.7.0), so the host and the GPU overlap. A step is GPU-bound.
+- **Mixed precision (opt-in):** `VULKAN_BACKEND.set_mixed_precision (True)` runs every product on the tensor cores, with bf16 operands and f32 sums (PyTorch's bf16 autocast). It reaches 9–12 TFLOP/s on the RixGPT shapes.
+  - It needs bf16 cooperative matrices on an NVIDIA GPU (`can_mix_precision`).
+  - Products stay within 1% of the oracle by norm (0.21% measured), and a full RixGPT run trains to the same train loss as f32.
 - **Running GPU programs:** put `%VULKAN_SDK%\Bin` on PATH; it holds shaderc_shared.dll.
 
 ## Modules (src/nn)
@@ -150,7 +156,7 @@ To run the benchmark: `ec.sh release -config simple_tensor.ecf -target simple_te
 | M0 ✅ | Spikes: CPU matmul, GC behavior, GPU through simple_vulkan | Numbers measured |
 | M1 ✅ | Tensors, operations with backward, autograd, SGD/AdamW, safetensors | Every op passes its gradient check |
 | M2 ✅ | RixGPT (a character-level GPT) trained from scratch in Eiffel | Validation loss 1.201 ± 0.05 at step 500: got 1.242 (train 1.510 vs 1.511) |
-| M3 | Vulkan GPU backend (M3b ✅: every kernel on the GPU, parity proven) | The full RixGPT run reaches 0.78 (running); then speed: our step takes about 1.5 s against PyTorch's 0.04 s |
+| M3 ✅ | Vulkan GPU backend: every kernel on the GPU, parity proven; tensor cores opt-in | The full RixGPT run reaches 0.782 ± 0.05: got 0.807 (f32) and 0.823 (mixed). Step 1.54 s → 0.32 s (PyTorch 0.04 s) |
 | M4 | Cactus Needle 3 forward pass (in simple_needle) | Parity with libneedle.dll |
 | M5 | Needle 3 LoRA fine-tune, exported to .cact | libneedle runs it and beats the untuned scores |
 
