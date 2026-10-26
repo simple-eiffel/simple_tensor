@@ -1,6 +1,19 @@
 # Changelog: simple_tensor
 
 ## Unreleased
+- **GPU backend (M3b), `simple_tensor_vulkan.ecf`:** VULKAN_BACKEND and VULKAN_STORAGE on simple_vulkan 0.4.0.
+  - Every kernel is GLSL with device-address push constants, recorded into batches, with buffers recycled through a pool.
+  - Hot and cold twin parity against the oracle; 0 host fallbacks. `profile_report` gives the per-kernel GPU time.
+  - Kernel highlights: 64×64 register-tiled matmul; deterministic CSR scatter for embedding gradients; Philox `fill_random` (masks bit-identical to the CPU's).
+- **Modules (src/nn):** NN_MODULE, NN_LAYER (`accepts`), NN_LINEAR, NN_EMBEDDING, NN_LAYER_NORM, NN_DROPOUT, NN_MLP, NN_CAUSAL_SELF_ATTENTION.
+  - PyTorch layouts and parameter names, so trained weights map one to one.
+- **Fused ops (memory):** `causal_softmax`, `layer_norm`, `linear` (bias in place), `dropped` (mask regenerated in backward, never stored).
+  - Each is held to its primitive composition by a test, values and gradients, and passes gradient checks.
+- **RixGPT trained in Eiffel (M2 gate):** step 500 reaches train 1.510 / val 1.242, against PyTorch's 1.511 / 1.201 (simple_rixgpt `simple_rixgpt_train.ecf`).
+- **Fixes:**
+  - VULKAN_STORAGE.dispose called a routine on another object, which may already be reclaimed; it now uses its own raw handles.
+  - A failed GPU allocation used to go unnoticed; it now retries after a collection, then raises a clear error.
+  - Three test helpers had side effects inside `check`.
 - TENSOR_RANDOM now draws from Philox4x32-10 (simple_randomizer 1.2.0, gap G-6). The period is 2^64 per stream instead of 2^31.
   - Every value has a fixed stream address (`position`), so a GPU kernel can reproduce any element.
   - Seeds may now be any non-negative INTEGER.
