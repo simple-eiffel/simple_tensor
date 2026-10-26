@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<system xmlns="http://www.eiffel.com/developers/xml/configuration/22" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.eiffel.com/developers/xml/configuration/22 http://www.eiffel.com/developers/xml/configuration/22/configuration.xsd" name="simple_tensor" uuid="5A3C8E21-7F4B-4D9A-B6E0-1C2D3F4A5B6C" library_target="simple_tensor">
+	<description>simple_tensor: tensors, automatic gradients, optimizers and training for Eiffel (CPU; Vulkan in M3)</description>
+	<target name="simple_tensor">
+		<root all_classes="true"/>
+		<option warning="error" full_class_checking="true" is_obsolete_routine_type="true" void_safety="all">
+			<assertions precondition="true" postcondition="true" invariant="true"/>
+		</option>
+		<setting name="total_order_on_reals" value="true"/>
+		<capability>
+			<concurrency support="scoop"/>
+			<void_safety support="all"/>
+		</capability>
+		<library name="base" location="$ISE_LIBRARY/library/base/base.ecf"/>
+		<library name="simple_mml" location="$SIMPLE_EIFFEL/simple_mml/simple_mml.ecf"/>
+		<library name="simple_math" location="$SIMPLE_EIFFEL/simple_math/simple_math.ecf"/>
+		<library name="simple_randomizer" location="$SIMPLE_EIFFEL/simple_randomizer/simple_randomizer.ecf"/>
+		<library name="simple_json" location="$SIMPLE_EIFFEL/simple_json/simple_json.ecf"/>
+		<library name="simple_file" location="$SIMPLE_EIFFEL/simple_file/simple_file.ecf"/>
+		<cluster name="src" location="src/" recursive="true"/>
+	</target>
+	<target name="simple_tensor_tests" extends="simple_tensor">
+		<root class="TEST_APP" feature="make"/>
+		<option warning="error">
+			<assertions precondition="true" postcondition="true" check="true" invariant="true" loop="true" supplier_precondition="true"/>
+		</option>
+		<setting name="total_order_on_reals" value="true"/>
+		<setting name="console_application" value="true"/>
+		<capability>
+			<concurrency support="scoop" use="scoop"/>
+		</capability>
+		<library name="simple_testing" location="$SIMPLE_EIFFEL/simple_testing/simple_testing.ecf"/>
+		<library name="testing" location="$ISE_LIBRARY/library/testing/testing.ecf"/>
+		<external_library location="psapi.lib"/>
+		<cluster name="tests" location="testing/" recursive="true"/>
+	</target>
+	<target name="simple_tensor_bench" extends="simple_tensor">
+		<root class="BENCH_APP" feature="make"/>
+		<setting name="total_order_on_reals" value="true"/>
+		<setting name="console_application" value="true"/>
+		<cluster name="bench" location="bench/" recursive="true"/>
+	</target>
+</system>

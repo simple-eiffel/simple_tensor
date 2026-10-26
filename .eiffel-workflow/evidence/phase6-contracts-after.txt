@@ -1,0 +1,1033 @@
+=== backend/backend_kinds.e
+=== backend/cpu_backend.e
+		require
+			cpu: attached {CPU_STORAGE} s
+=== backend/host_backend.e
+=== backend/reference_backend.e
+=== backend/tensor_backend.e
+		ensure
+			thirteen: Result.count = 13
+		require
+			positive: a_count >= 1
+			not_too_large: a_count <= {TENSOR_SHAPE}.Max_elements
+		ensure
+			owned: owns (Result)
+			counted: Result.count = a_count
+			live: not Result.is_released
+		require
+			owned: owns (a_out)
+			live: not a_out.is_released
+			sized: a_values.count = a_out.count
+		ensure
+			loaded: across 1 |..| a_values.count as ix all a_out.item (ix - 1) = a_values [a_values.lower + ix - 1] or a_values [a_values.lower + ix - 1] /= a_values [a_values.lower + ix - 1] end
+		require
+			owned: owns (a)
+			live: not a.is_released
+		ensure
+			sized: Result.count = a.count
+			one_based: Result.lower = 1
+		require
+			owned: owns (a_out)
+			live: not a_out.is_released
+		require
+			owned: owns (a) and owns (a_out)
+			live: not a.is_released and not a_out.is_released
+			same_count: a.count = a_out.count
+			distinct: a /= a_out
+		require
+			valid_kind: is_binary_kind (a_kind)
+			owned: owns (a) and owns (b) and owns (a_out)
+			live: not a.is_released and not b.is_released and not a_out.is_released
+			sized: a.count = a_shape_a.count and b.count = a_shape_b.count and a_out.count = a_shape_out.count
+			broadcast: a_shape_a.broadcasts_with (a_shape_b) and then a_shape_out ~ a_shape_a.broadcast_with (a_shape_b)
+			distinct_output: a_out /= a and a_out /= b
+		require
+			valid_kind: is_unary_kind (a_kind)
+			param_unused: not uses_param (a_kind) implies a_param = 0.0
+			owned: owns (a) and owns (a_out)
+			live: not a.is_released and not a_out.is_released
+			same_count: a.count = a_out.count
+			distinct_output: a_out /= a
+		require
+			valid_kind: is_unary_kind (a_kind)
+			param_unused: not uses_param (a_kind) implies a_param = 0.0
+			owned: owns (a) and owns (a_y) and owns (a_out)
+			live: not a.is_released and not a_y.is_released and not a_out.is_released
+			same_count: a.count = a_out.count and a_y.count = a.count
+			distinct_output: a_out /= a and a_out /= a_y
+		require
+			valid_kind: is_reduce_kind (a_kind)
+			owned: owns (a) and owns (a_out)
+			live: not a.is_released and not a_out.is_released
+			axis_valid: 1 <= a_axis and a_axis <= a_shape_a.rank
+			sized: a.count = a_shape_a.count and a_out.count = a_shape_a.count // a_shape_a.dim (a_axis)
+			distinct_output: a_out /= a
+		require
+			owned: owns (a) and owns (a_out)
+			live: not a.is_released and not a_out.is_released
+			axis_valid: 1 <= a_axis and a_axis <= a_shape_a.rank
+			same_count: a.count = a_shape_a.count and a_out.count = a.count
+			distinct_output: a_out /= a
+		require
+			owned: owns (a) and owns (a_out)
+			live: not a.is_released and not a_out.is_released
+			broadcastable: a_to.broadcasts_with (a_from) and then a_to.broadcast_with (a_from) ~ a_from
+			sized: a.count = a_from.count and a_out.count = a_to.count
+			distinct_output: a_out /= a
+		require
+			owned: owns (a)
+			live: not a.is_released
+		ensure
+			non_negative: Result >= 0.0 or Result /= Result
+		require
+			owned: owns (a)
+			live: not a.is_released
+		require
+			owned: owns (a) and owns (b) and owns (a_out)
+			live: not a.is_released and not b.is_released and not a_out.is_released
+			positive: a_batch >= 1 and a_m >= 1 and a_k >= 1 and a_n >= 1
+			a_sized: a.count = a_batch * a_m * a_k
+			b_sized: (a_b_shared implies b.count = a_k * a_n) and (not a_b_shared implies b.count = a_batch * a_k * a_n)
+			out_sized: a_out.count = a_batch * a_m * a_n
+			distinct_output: a_out /= a and a_out /= b
+		require
+			owned: owns (a) and owns (a_out)
+			live: not a.is_released and not a_out.is_released
+			sized: a.count = a_rows * a_cols and a_out.count = a.count
+			distinct_output: a_out /= a
+		require
+			owned: owns (a) and owns (a_out)
+			live: not a.is_released and not a_out.is_released
+			mask_broadcasts: a_shape_a.broadcasts_with (a_mask.shape) and then a_shape_a.broadcast_with (a_mask.shape) ~ a_shape_a
+			sized: a.count = a_shape_a.count and a_out.count = a.count
+			distinct_output: a_out /= a
+		require
+			owned: owns (a) and owns (a_out)
+			live: not a.is_released and not a_out.is_released
+			permutation: a_shape_a.is_permutation (a_order)
+			sized: a.count = a_shape_a.count and a_out.count = a.count
+			distinct_output: a_out /= a
+		require
+			owned: owns (a) and owns (a_out)
+			live: not a.is_released and not a_out.is_released
+			axis_valid: 1 <= a_axis and a_axis <= a_shape_a.rank
+			range: a_start >= 1 and a_length >= 1 and a_start + a_length - 1 <= a_shape_a.dim (a_axis)
+			sized: a.count = a_shape_a.count and a_out.count = (a_shape_a.count // a_shape_a.dim (a_axis)) * a_length
+			distinct_output: a_out /= a
+		require
+			owned: owns (a_part) and owns (a_out)
+			live: not a_part.is_released and not a_out.is_released
+			axis_valid: 1 <= a_axis and a_axis <= a_shape_out.rank
+			range: a_start >= 1 and a_length >= 1 and a_start + a_length - 1 <= a_shape_out.dim (a_axis)
+			sized: a_out.count = a_shape_out.count and a_part.count = (a_shape_out.count // a_shape_out.dim (a_axis)) * a_length
+			distinct_output: a_out /= a_part
+		require
+			owned: owns (a) and owns (b) and owns (a_out)
+			live: not a.is_released and not b.is_released and not a_out.is_released
+			same_rank: a_shape_a.rank = a_shape_b.rank
+			axis_valid: 1 <= a_axis and a_axis <= a_shape_a.rank
+			sized: a.count = a_shape_a.count and b.count = a_shape_b.count and a_out.count = a.count + b.count
+			distinct_output: a_out /= a and a_out /= b
+		require
+			owned: owns (a_table) and owns (a_out)
+			live: not a_table.is_released and not a_out.is_released
+			table_sized: a_table.count = a_rows * a_dim
+			indices_in_range: a_indices.all_in_range (0, a_rows - 1)
+			out_sized: a_out.count = a_indices.count * a_dim
+			distinct_output: a_out /= a_table
+		require
+			owned: owns (a_grad) and owns (a_out)
+			live: not a_grad.is_released and not a_out.is_released
+			out_sized: a_out.count = a_rows * a_dim
+			indices_in_range: a_indices.all_in_range (0, a_rows - 1)
+			grad_sized: a_grad.count = a_indices.count * a_dim
+			distinct_output: a_out /= a_grad
+		require
+			owned: owns (a_logits) and owns (a_out)
+			live: not a_logits.is_released and not a_out.is_released
+			sized: a_logits.count = a_rows * a_classes and a_targets.count = a_rows and a_out.count = 1
+			targets_in_range: a_targets.all_in_range_or (0, a_classes - 1, a_ignore)
+			some_target: a_targets.has_value_other_than (a_ignore)
+			distinct_output: a_out /= a_logits
+		require
+			owned: owns (a_logits) and owns (a_out)
+			live: not a_logits.is_released and not a_out.is_released
+			sized: a_logits.count = a_rows * a_classes and a_targets.count = a_rows and a_out.count = a_logits.count
+			targets_in_range: a_targets.all_in_range_or (0, a_classes - 1, a_ignore)
+			some_target: a_targets.has_value_other_than (a_ignore)
+			distinct_output: a_out /= a_logits
+		require
+			owned: owns (a_param) and owns (a_grad)
+			live: not a_param.is_released and not a_grad.is_released
+			same_count: a_param.count = a_grad.count
+			distinct: a_param /= a_grad
+		require
+			owned: owns (a_param) and owns (a_grad) and owns (a_m) and owns (a_v)
+			live: not a_param.is_released and not a_grad.is_released and not a_m.is_released and not a_v.is_released
+			same_count: a_grad.count = a_param.count and a_m.count = a_param.count and a_v.count = a_param.count
+			distinct: a_param /= a_grad and a_m /= a_v and a_m /= a_param and a_v /= a_param
+			step_positive: a_step >= 1
+=== backend/tensor_op_kinds.e
+=== data/token_batch.e
+		require
+			same_shape: a_inputs.shape ~ a_targets.shape
+			rank_two: a_inputs.shape.rank = 2
+		ensure
+			inputs_set: inputs = a_inputs
+			targets_set: targets = a_targets
+invariant
+	same_shape: inputs.shape ~ targets.shape
+
+=== data/token_batcher.e
+		require
+			one_dimensional: a_tokens.shape.rank = 1
+			positive: a_block >= 1 and a_batch >= 1
+			long_enough: a_tokens.count > a_block + 1
+		ensure
+			tokens_set: tokens = a_tokens
+			sizes_set: block_size = a_block and batch_size = a_batch
+			no_batch_yet: not has_batch
+		require
+			drawn: has_batch
+		ensure
+			batch_rows: Result.inputs.shape.dim (1) = batch_size
+			block_cols: Result.inputs.shape.dim (2) = block_size
+		ensure
+			drawn: has_batch
+invariant
+	positive: block_size >= 1 and batch_size >= 1
+
+=== gc_point.e
+=== grad_store.e
+		ensure
+			empty: count = 0
+		require
+			present: has (t)
+		ensure
+			shaped: Result.shape ~ t.shape
+			untracked: not Result.is_tracked
+		ensure
+			counted: Result.count = count
+			faithful: Result.for_all (agent has_id)
+		ensure
+			non_negative: Result >= 0.0 or Result /= Result
+		require
+			tracked_owner: t.is_tracked
+			shaped: g.shape ~ t.shape
+			same_backend: g.has_same_backend (t)
+			untracked_grad: not g.is_tracked
+		ensure
+			has_it: has (t)
+			keys: ids_model |=| (old ids_model & t.id)
+			copied: gradient (t).storage /= g.storage
+		ensure
+			gone: not has (t)
+			keys: ids_model |=| (old ids_model / t.id)
+		require
+			not_nan: a_factor = a_factor
+		ensure
+			keys: ids_model |=| old ids_model
+		require
+			positive: a_max > 0.0
+			finite: not has_non_finite
+		ensure
+			bounded: global_norm <= a_max * (1.0 + 1.0e-5)
+			untouched_when_within: old global_norm <= a_max implies global_norm = old global_norm
+			keys: ids_model |=| old ids_model
+		require
+			not_self: o /= Current
+			compatible: common_ids_shaped (o)
+		ensure
+			union: ids_model |=| (old ids_model + o.ids_model)
+invariant
+	same_keys_count: owners.count = gradients.count
+
+=== index_tensor.e
+		ensure
+			shape_set: shape = a_shape
+		require
+			sized: a_values.count = a_shape.count
+		ensure
+			shape_set: shape = a_shape
+		require
+			valid: 0 <= i and i < count
+		require
+			valid: 0 <= i and i < count
+		ensure
+			set: item (i) = v
+		require
+			at_least_one_dim: a_dims.count >= 1
+			dims_positive: across a_dims as d all d >= 1 end
+			not_too_large: shape.fits (a_dims)
+			same_count: shape.product_of (a_dims) = count
+		ensure
+			same_count: Result.count = count
+invariant
+	sized: block.count = shape.count * {PLATFORM}.integer_32_bytes
+
+=== io/safetensors_file.e
+		ensure
+			facade_set: facade = a_facade
+			nothing_loaded: not is_loaded and not has_error
+		require
+			loaded: is_loaded
+			known: has (a_name)
+		ensure
+			untracked: not Result.is_tracked
+		ensure
+			loaded_xor_error: is_loaded xor has_error
+			error_explained: has_error implies not last_error.is_empty
+			nothing_on_error: has_error implies names_model.is_empty
+		require
+			paired: a_names.count = a_tensors.count
+			live: across a_tensors as t all not t.is_released end
+			distinct_names: across a_names.lower |..| a_names.upper as i all
+				across a_names.lower |..| a_names.upper as j all i /= j implies not a_names [i].same_string (a_names [j]) end end
+			no_reserved_name: across a_names as n all not n.same_string ("__metadata__") end
+		ensure
+			error_explained: has_error implies not last_error.is_empty
+		ensure
+			clean: not is_loaded and not has_error and tensors.is_empty
+		ensure
+			flagged: has_error and not last_error.is_empty
+invariant
+	loaded_means_no_error: is_loaded implies not has_error
+
+=== io/tensor_dtype_codec.e
+		require
+			source: a_source /= default_pointer
+			sized: a_out.count = a_count
+			live: not a_out.is_released
+		require
+			source: a_source /= default_pointer
+			sized: a_out.count = a_count
+			live: not a_out.is_released
+		require
+			source: a_source /= default_pointer
+			sized: a_out.count = a_count
+			live: not a_out.is_released
+=== ops/tensor_op.e
+		require
+			grad_shaped: a_output_grad.shape ~ output_shape
+			grad_untracked: not a_output_grad.is_tracked
+			grad_backend: a_output_grad.has_same_backend (inputs [inputs.lower])
+			saved_values_live: saved_live
+		ensure
+			tracked_inputs_have_gradients: across inputs as i all i.is_tracked implies a_store.has (i) end
+		require
+			broadcastable: a_input.shape.broadcasts_with (g.shape) and then a_input.shape.broadcast_with (g.shape) ~ g.shape
+		ensure
+			shaped: Result.shape ~ a_input.shape
+		require
+			fits: a_storage.count = a_shape.count
+			owned: a_backend.owns (a_storage)
+			live: not a_storage.is_released
+		ensure
+			untracked: not Result.is_tracked
+invariant
+	has_inputs: inputs.count >= 1
+
+=== ops/tensor_op_add.e
+		require
+			broadcast: a.shape.broadcasts_with (b.shape) and then a_output_shape ~ a.shape.broadcast_with (b.shape)
+		ensure
+			inputs_set: inputs [1] = a and inputs [2] = b
+			shape_set: output_shape = a_output_shape
+=== ops/tensor_op_concat.e
+		require
+			same_rank: a.shape.rank = b.shape.rank
+			axis_valid: 1 <= a_axis and a_axis <= a.shape.rank
+		ensure
+			inputs_set: inputs [1] = a and inputs [2] = b
+			axis_set: axis = a_axis
+=== ops/tensor_op_cross_entropy.e
+		require
+			logits_rank: a_logits.shape.rank >= 2
+		ensure
+			logits_set: inputs [1] = a_logits
+			targets_set: targets = a_targets
+			ignore_set: ignore_index = a_ignore
+invariant
+	scalar_output: output_shape.count = 1
+
+=== ops/tensor_op_div.e
+		require
+			broadcast: a.shape.broadcasts_with (b.shape) and then a_output_shape ~ a.shape.broadcast_with (b.shape)
+		ensure
+			inputs_set: inputs [1] = a and inputs [2] = b
+			shape_set: output_shape = a_output_shape
+=== ops/tensor_op_gather_rows.e
+		require
+			table: a_table.shape.rank = 2
+		ensure
+			table_set: inputs [1] = a_table
+			indices_set: indices = a_indices
+=== ops/tensor_op_masked_fill.e
+		require
+			mask_broadcasts: a.shape.broadcasts_with (a_mask.shape)
+		ensure
+			input_set: inputs [1] = a
+			mask_set: mask = a_mask
+=== ops/tensor_op_matmul.e
+		require
+			ranks: a.shape.rank >= 2 and b.shape.rank >= 2
+		ensure
+			inputs_set: inputs [1] = a and inputs [2] = b
+			flags_set: transpose_a = a_ta and transpose_b = a_tb
+=== ops/tensor_op_max.e
+		require
+			axis_valid: 1 <= a_axis and a_axis <= a.shape.rank
+			mask_sized: a_mask.count = a.shape.count
+		ensure
+			axis_set: axis = a_axis
+			mask_saved: argmax = a_mask
+=== ops/tensor_op_mse.e
+		require
+			same_shape: a.shape ~ b.shape
+		ensure
+			inputs_set: inputs [1] = a and inputs [2] = b
+invariant
+	scalar_output: output_shape.count = 1
+
+=== ops/tensor_op_mul.e
+		require
+			broadcast: a.shape.broadcasts_with (b.shape) and then a_output_shape ~ a.shape.broadcast_with (b.shape)
+		ensure
+			inputs_set: inputs [1] = a and inputs [2] = b
+			shape_set: output_shape = a_output_shape
+=== ops/tensor_op_permute.e
+		require
+			permutation: a.shape.is_permutation (a_order)
+		ensure
+			input_set: inputs [1] = a
+=== ops/tensor_op_reduce.e
+		require
+			sum_or_mean: a_kind = Sum_kind or a_kind = Mean_kind
+			axis_valid: 1 <= a_axis and a_axis <= a.shape.rank
+		ensure
+			kind_set: kind = a_kind
+			axis_set: axis = a_axis
+			keep_set: keep = a_keep
+invariant
+	sum_or_mean: kind = Sum_kind or kind = Mean_kind
+
+=== ops/tensor_op_reduce_to.e
+		require
+			broadcastable: a_output_shape.broadcasts_with (a.shape) and then a_output_shape.broadcast_with (a.shape) ~ a.shape
+		ensure
+			input_set: inputs [1] = a
+=== ops/tensor_op_reshape.e
+		require
+			same_count: a_output_shape.count = a.shape.count
+		ensure
+			input_set: inputs [1] = a
+=== ops/tensor_op_slice.e
+		require
+			axis_valid: 1 <= a_axis and a_axis <= a.shape.rank
+			range: a_start >= 1 and a_length >= 1 and a_start + a_length - 1 <= a.shape.dim (a_axis)
+		ensure
+			set: axis = a_axis and start = a_start and length = a_length
+=== ops/tensor_op_softmax.e
+		require
+			output_sized: a_output.count = a.shape.count
+		ensure
+			input_set: inputs [1] = a
+			output_saved: output_values = a_output
+			log_set: is_log = a_log
+=== ops/tensor_op_sub.e
+		require
+			broadcast: a.shape.broadcasts_with (b.shape) and then a_output_shape ~ a.shape.broadcast_with (b.shape)
+		ensure
+			inputs_set: inputs [1] = a and inputs [2] = b
+			shape_set: output_shape = a_output_shape
+=== ops/tensor_op_unary.e
+		require
+			valid_kind: is_unary_kind (a_kind)
+			output_sized: a_output.count = a.shape.count
+		ensure
+			kind_set: kind = a_kind
+			input_set: inputs [1] = a
+			output_saved: output_values = a_output
+			param_set: param = a_param
+invariant
+	valid_kind: is_unary_kind (kind)
+	output_sized: output_values.count = output_shape.count
+
+=== optim/adamw_optimizer.e
+		require
+			leaves_requiring_grad: across a_parameters as p all p.requires_grad end
+			distinct: distinct_ids (a_parameters)
+			beta1_range: 0.0 <= a_beta1 and a_beta1 < 1.0
+			beta2_range: 0.0 <= a_beta2 and a_beta2 < 1.0
+			eps_positive: a_eps > 0.0
+			decay_non_negative: a_decay >= 0.0
+		ensure
+			parameters_set: parameters = a_parameters
+			fresh: step_count = 0
+			no_state_yet: first_moments.is_empty and second_moments.is_empty
+		ensure then
+			state_for_updated: across parameters as p all a_grads.has (p) implies state_ids_model.has (p.id) end
+invariant
+	beta1_range: 0.0 <= beta1 and beta1 < 1.0
+	beta2_range: 0.0 <= beta2 and beta2 < 1.0
+	eps_positive: eps > 0.0
+	same_state_count: first_moments.count = second_moments.count
+
+=== optim/constant_schedule.e
+		require
+			non_negative: a_rate >= 0.0
+		ensure
+			set: value = a_rate
+		ensure then
+			constant: Result = value
+invariant
+	non_negative: value >= 0.0
+
+=== optim/lr_schedule.e
+		require
+			non_negative: a_step >= 0
+		ensure
+			non_negative: Result >= 0.0
+=== optim/sgd_optimizer.e
+		require
+			leaves_requiring_grad: across a_parameters as p all p.requires_grad end
+			distinct: distinct_ids (a_parameters)
+		ensure
+			parameters_set: parameters = a_parameters
+			schedule_set: schedule = a_schedule
+			fresh: step_count = 0
+=== optim/tensor_optimizer.e
+		ensure
+			counted: Result.count = parameters.count
+		require
+			finite: not a_grads.has_non_finite
+			shaped: a_grads.all_shapes_match
+			live: across parameters as p all not p.is_released end
+		ensure
+			counted: step_count = old step_count + 1
+			same_parameters: parameters_model |=| old parameters_model
+			same_schedule: schedule = old schedule
+invariant
+	non_negative_steps: step_count >= 0
+
+=== optim/warmup_cosine_schedule.e
+		require
+			peak_positive: a_peak > 0.0
+			warmup_non_negative: a_warmup >= 0
+			total_after_warmup: a_total > a_warmup
+			floor_ratio_valid: 0.0 <= a_floor_ratio and a_floor_ratio <= 1.0
+		ensure
+			peak_set: peak = a_peak
+			warmup_set: warmup = a_warmup
+			total_set: total = a_total
+			floor_set: floor_ratio = a_floor_ratio
+		ensure then
+			warmup_linear: a_step < warmup implies Result = peak * a_step / warmup.max (1)
+			never_below_floor: a_step >= warmup implies Result >= peak * floor_ratio - 1.0e-12
+			never_above_peak: Result <= peak + 1.0e-12
+			floor_after_total: a_step >= total implies (Result - peak * floor_ratio).abs <= 1.0e-12
+invariant
+	ordered: total > warmup and warmup >= 0
+	floor_ratio_valid: 0.0 <= floor_ratio and floor_ratio <= 1.0
+
+=== simple_tensor.e
+		ensure
+			cpu: backend.kind = backend.Cpu_backend_kind
+		ensure
+			backend_set: backend = a_backend
+		require
+			valid_dims: valid_dims (a_dims)
+		ensure
+			shaped: Result.shape.to_array ~ a_dims
+			untracked: not Result.is_tracked
+			on_backend: Result.backend = backend
+		require
+			valid_dims: valid_dims (a_dims)
+		ensure
+			untracked: not Result.is_tracked
+			on_backend: Result.backend = backend
+		require
+			valid_dims: valid_dims (a_dims)
+		ensure
+			untracked: not Result.is_tracked
+			on_backend: Result.backend = backend
+		ensure
+			scalar: Result.is_scalar
+			untracked: not Result.is_tracked
+		require
+			valid_dims: valid_dims (a_dims)
+			sized: a_values.count = product (a_dims)
+		ensure
+			untracked: not Result.is_tracked
+			on_backend: Result.backend = backend
+		require
+			same_backend: a_tensor.backend.is_compatible (backend)
+		ensure
+			leaf: Result.origin = Void
+			requires_grad: Result.requires_grad
+			same_shape: Result.shape ~ a_tensor.shape
+			copied: Result.storage /= a_tensor.storage
+		require
+			valid_dims: valid_dims (a_dims)
+			sized: a_values.count = product (a_dims)
+		ensure
+			counted: Result.count = a_values.count
+		require
+			positive: a_size >= 1
+		ensure
+			square: Result.shape.rank = 2 and Result.shape.dim (1) = a_size and Result.shape.dim (2) = a_size
+=== storage/cpu_storage.e
+		require
+			positive: a_count >= 1
+			not_too_large: a_count <= {TENSOR_SHAPE}.Max_elements
+		ensure
+			counted: count = a_count
+			live: not is_released
+		require
+			live: not is_released
+invariant
+	sized_while_live: not is_released implies block.count = element_count * {PLATFORM}.real_32_bytes
+
+=== storage/storage_budget.e
+		require
+			positive: a_budget > 0
+		ensure
+			budget_set: budget = a_budget
+			fresh: allocated_since_collect = 0 and collections = 0 and largest_request = 0
+		require
+			non_negative: a_bytes >= 0
+		ensure
+			collected_when_over: (old allocated_since_collect + a_bytes > budget) implies
+				(collections = old collections + 1 and allocated_since_collect = a_bytes)
+			counted_when_under: (old allocated_since_collect + a_bytes <= budget) implies
+				(collections = old collections and allocated_since_collect = old allocated_since_collect + a_bytes)
+			largest_tracked: largest_request = (old largest_request).max (a_bytes)
+			budget_unchanged: budget = old budget
+		require
+			positive: a_budget > 0
+		ensure
+			set: budget = a_budget
+			count_kept_when_within: (old allocated_since_collect <= a_budget + old largest_request) implies
+				(allocated_since_collect = old allocated_since_collect and collections = old collections)
+			collected_when_over: (old allocated_since_collect > a_budget + old largest_request) implies
+				(allocated_since_collect = 0 and collections = old collections + 1)
+			largest_unchanged: largest_request = old largest_request
+invariant
+	budget_positive: budget > 0
+	non_negative: allocated_since_collect >= 0 and collections >= 0 and largest_request >= 0
+	bounded: allocated_since_collect <= budget + largest_request
+
+=== storage/storage_budget_access.e
+=== storage/tensor_storage.e
+		require
+			valid_index: 0 <= i and i < count
+			live: not is_released
+		ensure
+			counted: owner_count = old owner_count + 1
+		require
+			valid_index: 0 <= i and i < count
+			live: not is_released
+		ensure
+			set: item (i) = v or else (v /= v)
+		ensure
+			released: is_released
+			count_kept: count = old count
+invariant
+	count_positive: count >= 1
+	owners_non_negative: owner_count >= 0
+
+=== tensor.e
+		require
+			fits: a_storage.count = a_shape.count
+			owned: a_backend.owns (a_storage)
+			live: not a_storage.is_released
+		ensure
+			shape_set: shape = a_shape
+			storage_set: storage = a_storage
+			backend_set: backend = a_backend
+			leaf: origin = Void
+			grad_flag: requires_grad = a_requires_grad
+		require
+			fits: a_storage.count = a_shape.count
+			owned: a_backend.owns (a_storage)
+			live: not a_storage.is_released
+		ensure
+			shape_set: shape = a_shape
+			storage_set: storage = a_storage
+			backend_set: backend = a_backend
+			not_a_parameter: not requires_grad
+			origin_set: origin = a_origin
+		require
+			valid: 0 <= i and i < shape.count
+			live: not is_released
+		require
+			live: not is_released
+		ensure
+			counted: Result.count = shape.count
+		require
+			same_backend: has_same_backend (o)
+			shapes_broadcast: shape.broadcasts_with (o.shape)
+			live: not is_released and not o.is_released
+		ensure
+			shape_broadcast: Result.shape ~ shape.broadcast_with (o.shape)
+			tracked_iff_input_tracked: Result.is_tracked = (is_tracked or o.is_tracked)
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage and Result.storage /= o.storage
+		require
+			same_backend: has_same_backend (o)
+			shapes_broadcast: shape.broadcasts_with (o.shape)
+			live: not is_released and not o.is_released
+		ensure
+			shape_broadcast: Result.shape ~ shape.broadcast_with (o.shape)
+			tracked_iff_input_tracked: Result.is_tracked = (is_tracked or o.is_tracked)
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage and Result.storage /= o.storage
+		require
+			same_backend: has_same_backend (o)
+			shapes_broadcast: shape.broadcasts_with (o.shape)
+			live: not is_released and not o.is_released
+		ensure
+			shape_broadcast: Result.shape ~ shape.broadcast_with (o.shape)
+			tracked_iff_input_tracked: Result.is_tracked = (is_tracked or o.is_tracked)
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage and Result.storage /= o.storage
+		require
+			same_backend: has_same_backend (o)
+			shapes_broadcast: shape.broadcasts_with (o.shape)
+			live: not is_released and not o.is_released
+		ensure
+			shape_broadcast: Result.shape ~ shape.broadcast_with (o.shape)
+			tracked_iff_input_tracked: Result.is_tracked = (is_tracked or o.is_tracked)
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage and Result.storage /= o.storage
+		require
+			valid_kind: is_unary_kind (a_kind)
+			param_unused: not uses_param (a_kind) implies a_param = 0.0
+			live: not is_released
+		ensure
+			same_shape: Result.shape ~ shape
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage
+		require live: not is_released
+		require live: not is_released
+		require live: not is_released
+		require live: not is_released
+		require live: not is_released
+		require live: not is_released
+		require live: not is_released
+		require live: not is_released
+		require live: not is_released
+		require live: not is_released
+		require live: not is_released
+		require
+			axis_valid: 1 <= a_axis and a_axis <= shape.rank
+			live: not is_released
+		ensure
+			kept: a_keep implies (Result.shape ~ shape.with_dim (a_axis, 1))
+			dropped: (not a_keep and shape.rank > 1) implies (Result.shape ~ shape.without_dim (a_axis))
+			scalar_from_vector: (not a_keep and shape.rank = 1) implies Result.is_scalar
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage
+		require
+			axis_valid: 1 <= a_axis and a_axis <= shape.rank
+			live: not is_released
+		ensure
+			kept: a_keep implies (Result.shape ~ shape.with_dim (a_axis, 1))
+			dropped: (not a_keep and shape.rank > 1) implies (Result.shape ~ shape.without_dim (a_axis))
+			scalar_from_vector: (not a_keep and shape.rank = 1) implies Result.is_scalar
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage
+		require
+			axis_valid: 1 <= a_axis and a_axis <= shape.rank
+			live: not is_released
+		ensure
+			kept: a_keep implies (Result.shape ~ shape.with_dim (a_axis, 1))
+			dropped: (not a_keep and shape.rank > 1) implies (Result.shape ~ shape.without_dim (a_axis))
+			scalar_from_vector: (not a_keep and shape.rank = 1) implies Result.is_scalar
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage
+		require
+			live: not is_released
+		ensure
+			scalar: Result.is_scalar
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+		require
+			live: not is_released
+		ensure
+			scalar: Result.is_scalar
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+		require
+			broadcastable: a_shape.broadcasts_with (shape) and then a_shape.broadcast_with (shape) ~ shape
+			live: not is_released
+		ensure
+			shaped: Result.shape ~ a_shape
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage
+		require
+			at_least_one_dim: a_dims.count >= 1
+			dims_positive: across a_dims as d all d >= 1 end
+			not_too_large: shape.fits (a_dims)
+			same_count: shape.product_of (a_dims) = shape.count
+			live: not is_released
+		ensure
+			shares_storage: Result.storage = storage
+			shaped: Result.shape ~ shape.reshaped (a_dims)
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+		require
+			permutation: shape.is_permutation (a_order)
+			live: not is_released
+		ensure
+			shaped: Result.shape ~ shape.permuted (a_order)
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage
+		require
+			rank_two_or_more: shape.rank >= 2
+			live: not is_released
+		ensure
+			shaped: Result.shape ~ shape.with_dim (shape.rank - 1, shape.last).with_dim (shape.rank, shape.dim (shape.rank - 1))
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage
+		require
+			axis_valid: 1 <= a_axis and a_axis <= shape.rank
+			range: a_start >= 1 and a_length >= 1 and a_start + a_length - 1 <= shape.dim (a_axis)
+			live: not is_released
+		ensure
+			shaped: Result.shape ~ shape.with_dim (a_axis, a_length)
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage
+		require
+			same_backend: has_same_backend (o)
+			same_rank: o.shape.rank = shape.rank
+			axis_valid: 1 <= a_axis and a_axis <= shape.rank
+			other_dims_agree: across 1 |..| shape.rank as i all i /= a_axis implies o.shape.dim (i) = shape.dim (i) end
+			live: not is_released and not o.is_released
+		ensure
+			shaped: Result.shape ~ shape.with_dim (a_axis, shape.dim (a_axis) + o.shape.dim (a_axis))
+			tracked_iff_input_tracked: Result.is_tracked = (is_tracked or o.is_tracked)
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage and Result.storage /= o.storage
+		require
+			same_backend: has_same_backend (o)
+			ranks: shape.rank >= 2 and o.shape.rank >= 2
+			inner_dims_agree: shape.last = o.shape.dim (o.shape.rank - 1)
+			batches_agree: o.shape.rank = 2 or else (o.shape.rank = shape.rank and then
+				(shape.rank = 2 or else o.shape.without_last.without_last ~ shape.without_last.without_last))
+			live: not is_released and not o.is_released
+		ensure
+			shaped: Result.shape ~ shape.with_dim (shape.rank, o.shape.last)
+			tracked_iff_input_tracked: Result.is_tracked = (is_tracked or o.is_tracked)
+		require
+			same_backend: has_same_backend (o)
+			ranks: shape.rank >= 2 and o.shape.rank >= 2
+			inner_dims_agree: matmul_inner (a_ta) = o.matmul_outer (a_tb)
+			batches_agree: o.shape.rank = 2 or else (o.shape.rank = shape.rank and then
+				(shape.rank = 2 or else o.shape.without_last.without_last ~ shape.without_last.without_last))
+			live: not is_released and not o.is_released
+		ensure
+			shaped: Result.shape ~ shape.with_dim (shape.rank - 1, matmul_rows (a_ta)).with_dim (shape.rank, o.matmul_cols (a_tb))
+			tracked_iff_input_tracked: Result.is_tracked = (is_tracked or o.is_tracked)
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage and Result.storage /= o.storage
+		require
+			live: not is_released
+		ensure
+			same_shape: Result.shape ~ shape
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage
+		require
+			live: not is_released
+		ensure
+			same_shape: Result.shape ~ shape
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage
+		require
+			mask_broadcasts: shape.broadcasts_with (a_mask.shape) and then shape.broadcast_with (a_mask.shape) ~ shape
+			live: not is_released
+		ensure
+			same_shape: Result.shape ~ shape
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage
+		require
+			table: shape.rank = 2
+			indices_in_range: a_indices.all_in_range (0, shape.dim (1) - 1)
+			live: not is_released
+		ensure
+			shaped: Result.shape ~ a_indices.shape.appended (shape.last)
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+			fresh_storage: Result.storage /= storage
+		require
+			logits_rank: shape.rank >= 2
+			targets_shape: a_targets.shape ~ shape.without_last
+			targets_in_range: a_targets.all_in_range_or (0, shape.last - 1, a_ignore)
+			some_target: a_targets.has_value_other_than (a_ignore)
+			live: not is_released
+		ensure
+			scalar: Result.is_scalar
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+		require
+			same_backend: has_same_backend (o)
+			same_shape: o.shape ~ shape
+			live: not is_released and not o.is_released
+		ensure
+			scalar: Result.is_scalar
+			tracked_iff_input_tracked: Result.is_tracked = (is_tracked or o.is_tracked)
+			not_a_parameter: not Result.requires_grad
+		require
+			live: not is_released
+		ensure
+			shares_storage: Result.storage = storage
+			same_shape: Result.shape = shape
+			untracked: not Result.is_tracked
+		ensure
+			same_shape: Result.shape ~ shape
+			same_backend: Result.backend = backend
+			untracked: not Result.is_tracked
+		ensure
+			same_shape: Result.shape ~ shape
+			same_backend: Result.backend = backend
+			untracked: not Result.is_tracked
+		require
+			live: not is_released
+		ensure
+			same_shape: Result.shape ~ shape
+			moved: Result.backend = a_backend
+			untracked: not Result.is_tracked
+		require
+			is_scalar: is_scalar
+			tracked: is_tracked
+			live: not is_released
+		ensure
+			only_grad_leaves: Result.holds_only_grad_leaves
+			leaves_shaped: Result.all_shapes_match
+			exactly_the_reachable_leaves: Result.ids_model |=| grad_leaf_ids_model
+			graph_intact: origin = old origin
+		require
+			not_shared: not storage_shared
+			not_a_parameter: not requires_grad
+		ensure
+			released: is_released
+		require
+			rank_two_or_more: shape.rank >= 2
+		require
+			rank_two_or_more: shape.rank >= 2
+		require
+			rank_two_or_more: shape.rank >= 2
+		require
+			rank_two_or_more: shape.rank >= 2
+invariant
+	storage_fits: storage.count = shape.count
+	leaf_has_no_origin: requires_grad implies origin = Void
+	backend_owns_storage: backend.owns (storage)
+
+=== tensor_random.e
+		require
+			seed_valid: a_seed > 0 and a_seed < 2_147_483_647
+				-- Seed 0 or 2^31-1 gives a constant stream (verdict R3-01).
+		ensure
+			seed_set: seed = a_seed
+			nothing_drawn: last_index = 0
+		require
+			positive: a_upper >= 1
+		ensure
+			in_range: 0 <= last_index and last_index < a_upper
+		require
+			ordered: a_low <= a_high
+			untracked: not a_tensor.is_tracked
+			live: not a_tensor.is_released
+		ensure
+			in_range: across 0 |..| (a_tensor.shape.count - 1) as ix all a_low <= a_tensor.item (ix) and a_tensor.item (ix) <= a_high end
+		require
+			std_non_negative: a_std >= 0.0
+			untracked: not a_tensor.is_tracked
+			live: not a_tensor.is_released
+		require
+			probability: 0.0 < a_keep and a_keep <= 1.0
+			untracked: not a_tensor.is_tracked
+			live: not a_tensor.is_released
+		ensure
+			two_values: across 0 |..| (a_tensor.shape.count - 1) as ix all a_tensor.item (ix) = 0.0 or (a_tensor.item (ix) - 1.0 / a_keep).abs <= 1.0e-6 end
+=== tensor_shape.e
+		require
+			at_least_one_dim: a_dims.count >= 1
+			dims_positive: across a_dims as d all d >= 1 end
+			not_too_large: fits (a_dims)
+		ensure
+			rank_set: rank = a_dims.count
+			dims_copied: across 1 |..| rank as ix all dim (ix) = a_dims [a_dims.lower + ix - 1] end
+			count_is_product: count = product_of (a_dims)
+		ensure
+			scalar: rank = 1 and count = 1
+		require
+			valid: 1 <= i and i <= rank
+		ensure
+			positive: Result >= 1
+		ensure
+			counted: Result.count = rank
+			faithful: across 1 |..| rank as ix all Result [ix] = dim (ix) end
+		ensure
+			counted: Result.count = rank
+			one_based: Result.lower = 1
+		ensure then
+			exact: Result = (rank = o.rank and then across 1 |..| rank as ix all dim (ix) = o.dim (ix) end)
+		ensure
+			sized: Result implies a_order.count = rank
+		require
+			compatible: broadcasts_with (o)
+		ensure
+			rank_is_max: Result.rank = rank.max (o.rank)
+		require
+			at_least_one_dim: a_dims.count >= 1
+			dims_positive: across a_dims as d all d >= 1 end
+			not_too_large: fits (a_dims)
+			same_count: product_of (a_dims) = count
+		ensure
+			same_count: Result.count = count
+			rank_set: Result.rank = a_dims.count
+		require
+			valid: 1 <= i and i <= rank
+			positive: a_value >= 1
+		ensure
+			same_rank: Result.rank = rank
+			set: Result.dim (i) = a_value
+			others_kept: across 1 |..| rank as j all j /= i implies Result.dim (j) = dim (j) end
+		require
+			valid: 1 <= i and i <= rank
+			rank_above_one: rank >= 2
+		ensure
+			one_less: Result.rank = rank - 1
+		require
+			rank_above_one: rank >= 2
+		ensure
+			one_less: Result.rank = rank - 1
+		require
+			positive: a_dim >= 1
+		ensure
+			one_more: Result.rank = rank + 1
+			last_set: Result.last = a_dim
+		require
+			permutation: is_permutation (a_order)
+		ensure
+			same_rank: Result.rank = rank
+			reordered: across 1 |..| rank as i all Result.dim (i) = dim (a_order [a_order.lower + i - 1]) end
+		require
+			not_too_large: fits (a_dims)
+invariant
+	rank_positive: rank >= 1
+	count_positive: count >= 1
+

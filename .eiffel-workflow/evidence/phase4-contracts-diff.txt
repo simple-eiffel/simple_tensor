@@ -1,0 +1,24 @@
+2a3,4
+> 		require
+> 			cpu: attached {CPU_STORAGE} s
+286a289,292
+> 		ensure
+> 			clean: not is_loaded and not has_error and tensors.is_empty
+> 		ensure
+> 			flagged: has_error and not last_error.is_empty
+298a305,308
+> 		require
+> 			source: a_source /= default_pointer
+> 			sized: a_out.count = a_count
+> 			live: not a_out.is_released
+306a317,326
+> 		require
+> 			broadcastable: a_input.shape.broadcasts_with (g.shape) and then a_input.shape.broadcast_with (g.shape) ~ g.shape
+> 		ensure
+> 			shaped: Result.shape ~ a_input.shape
+> 		require
+> 			fits: a_storage.count = a_shape.count
+> 			owned: a_backend.owns (a_storage)
+> 			live: not a_storage.is_released
+> 		ensure
+> 			untracked: not Result.is_tracked

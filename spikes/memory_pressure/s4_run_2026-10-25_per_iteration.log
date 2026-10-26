@@ -1,0 +1,5 @@
+# S-4 re-measured after review A-01: sample every iteration before collect, 2026-10-25T19:35:02-04:00, lean
+start private MB: 16
+A. GC decides            : peak private MB 8040, after collect 20, 29 ms
+B. full_collect every 50 : peak private MB 221, after collect 20, 29 ms
+C. explicit release      : peak private MB 40, after collect 16, 69 ms

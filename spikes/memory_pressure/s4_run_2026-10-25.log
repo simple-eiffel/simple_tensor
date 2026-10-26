@@ -1,0 +1,5 @@
+# S-4 raw run log, 2026-10-25T19:22:58-04:00, lean build: EIFGENs/s4_spike/F_code/s4_spike_lean.exe (source s4_app.e)
+start private MB: 16
+A. GC decides            : peak private MB 8040, after collect 21, 23 ms
+B. full_collect every 50 : peak private MB 21, after collect 21, 22 ms
+C. explicit release      : peak private MB 40, after collect 17, 51 ms

@@ -1,0 +1,44 @@
+simple_tensor tests
+===================
+  PASS: shape basics
+  PASS: shape broadcast rules
+  PASS: storage budget forces a collection
+      51 gradient checks run, worst |analytic - numeric| = 0.00013241395302754366
+  PASS: gradient check: every primitive
+      twin parity: worst relative error 2.0861625671386719e-07 (matmul batched shared B element 177: oracle 0.420532, candidate 0.420532)
+  PASS: twin parity: every CPU kernel
+  PASS: tied weight accumulates both gradients
+  PASS: frozen leaf gets no gradient
+  PASS: AdamW 3-step hand trace
+  PASS: schedule equals rixgpt.py lr_at
+  PASS: same seed, same losses
+  PASS: non-finite gradients detected
+  PASS: safetensors round trip
+  PASS: batcher targets are inputs shifted by one
+      memory: rise over start 17 MB while churning ~457 MB (budget 16 MB)
+  PASS: 1,000 steps stay within the memory budget
+      GC probe: worst root allocation 7 ms with training on another processor (4 steps in 3910 ms, launched just before a ~2000 ms window), baseline 4 ms
+  PASS: GC probe: other processor's worst allocation under 10 ms
+      CPU matmul (DbC test build): 33 GFLOP/s; the AC-9 gate runs in the lean bench target
+  PASS: CPU matmul throughput recorded (gate in lean target)
+      XOR after 500 AdamW steps: loss 1.77636e-15
+  PASS: README quick start learns XOR
+  PASS: zeros_like, ones_like, to_backend round trip
+  PASS: GRAD_STORE scale, clip, merge
+  PASS: SGD hand trace on both backends
+  PASS: random index range and dropout mask
+  PASS: shared storage guards release
+  PASS: preconditions reject misuse
+  PASS: hostile safetensors files refused
+  PASS: extreme values stay finite or are flagged
+  PASS: backward twice, diamond, 5,000-op chain
+      two processors: losses 0.910236, 0.910236; root 0.910236
+  PASS: two trainers on separate processors
+      stress: 5,000 steps, loss 0.0689082 -> 0.0494076, memory rise 0 MB
+  PASS: stress: 5,000 small steps
+  PASS: batcher on the tightest corpus
+  PASS: budget lowered mid-run collects
+  PASS: SCOOP consumer compiles and creates the main types
+
+===================
+Results: 31 passed, 0 failed

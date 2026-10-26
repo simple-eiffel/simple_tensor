@@ -1,0 +1,45 @@
+# Phase 1 Compilation Evidence
+# Project: D:\prod\simple_tensor
+# Date: 2026-10-25
+# Commands (ec.sh modes; raw -batch flags are blocked by the wrapper):
+#   /d/prod/ec.sh check -config simple_tensor.ecf -target simple_tensor        (library target: root all_classes -> EVERY class type-checked)
+#   /d/prod/ec.sh check -config simple_tensor.ecf -target simple_tensor_tests
+#   /d/prod/ec.sh test  -config simple_tensor.ecf -target simple_tensor_tests  (finalize + C compile)
+
+Fix-up iterations before green (each recorded in the oracle where new):
+  1. Kind constants (Sum, Sigmoid, Relu, ...) clashed case-insensitively with TENSOR queries sum, sigmoid, relu
+     -> renamed to *_kind (caught before compile)
+  2. Syntax error: assertion tag `reference:` (keyword)              -> on_reference_backend:   [oracle gotcha recorded]
+  3. VOIT(2)/VEEN(22): across loop variable `i` = routine local `i`  -> ix
+  4. VAPE: matmul_inner/matmul_outer used in a public precondition but exported to {TENSOR, TENSOR_OP} -> made public
+     (found ONLY by checking the library target: the tests target compiles just what TEST_APP reaches)
+
+Final results:
+  ec.sh check  -target simple_tensor        : "Syntax and type check passed", log errors/warnings: 0
+  ec.sh check  -target simple_tensor_tests  : "Syntax and type check passed", log errors/warnings: 0
+  ec.sh test   -target simple_tensor_tests  : "Built: EIFGENs/simple_tensor_tests/F_code/simple_tensor.exe", log errors/warnings (incl. error C/LNK): 0
+
+Test run (F_code/simple_tensor.exe): Results: 15 passed, 0 failed, exit 0
+  HONEST NOTE: 13 of the 15 are Phase-1 skeletons with empty bodies (Phase 5 fills them).
+  Exercising real code: test_shape_basics (TENSOR_SHAPE.make, rank, count, last)
+                        test_scoop_compatibility (creates SIMPLE_TENSOR on CPU and REFERENCE, TENSOR_SHAPE,
+                        GRAD_STORE, WARMUP_COSINE_SCHEDULE, TENSOR_RANDOM, SAFETENSORS_FILE under concurrency=scoop)
+
+Classes: 46 in src (core 9, storage 3, backend 4, ops 19, optim 6, data 2, io 2... see tree) + 5 testing
+  Ops: 18 op classes cover 33 primitives (TENSOR_OP_UNARY serves 11 one-input ops via backend.unary_derivative;
+       softmax/log_softmax share TENSOR_OP_SOFTMAX; dropout is a composition, not a primitive)
+  CPU_BACKEND inherits REFERENCE_BACKEND and redefines 13 hot kernels (twin parity is checked exactly where they differ)
+
+ECF Dependency Audit:
+- ISE allowed: base (MANAGED_POINTER, MEMORY, containers), testing (EQA via simple_testing)
+- simple_* used: simple_mml, simple_math, simple_randomizer, simple_json, simple_file, simple_testing
+- Violations: none
+- Gaps identified: G-2 simple_randomizer Gaussian; G-3 simple_math tanh/erf; G-4 simple_vulkan training gaps (M3)
+
+SCOOP consumer test: TEST_SCOOP_CONSUMER wired into TEST_APP; compiled and ran under concurrency use="scoop".
+
+MML step (/eiffel.mml): satisfied in Phase 1 per the Phase 0 decision (YES-Optional): model queries present on
+  GRAD_STORE.ids_model (MML_SET), TENSOR_OPTIMIZER.parameters_model (MML_SEQUENCE), TENSOR_SHAPE.dims_model,
+  ADAMW_OPTIMIZER.state_ids_model, SAFETENSORS_FILE.names_model; frames use |=|. No MML in invariants (O(1) law).
+
+# Status: PASS

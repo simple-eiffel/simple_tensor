@@ -1,0 +1,36 @@
+# Phase 4 pre-freeze contract amendment pass
+# Project: D:\prod\simple_tensor
+# Date: 2026-10-25
+# Authority: Phase 2 verdict (review/04 - VERDICT.md) ADOPTED by Larry 2026-10-25 ("yes to all five, keep going").
+#   Section 6 "Other MEDIUM/LOW items land with their class in Phase 4". Phase 4's rule freezes contracts,
+#   so all of them landed HERE, before the freeze snapshot (phase4-contracts-before.txt). Any later diff is a real stop signal.
+
+R2-09  TENSOR_KINDS split into TENSOR_OP_KINDS (+ uses_param) and BACKEND_KINDS; both public
+R2-05  HOST_BACKEND (deferred; storage, transfer, cold kernels, GC_POINT) with REFERENCE_BACKEND and CPU_BACKEND as siblings;
+       hot kernels deferred in HOST_BACKEND, so each sibling must provide all 13 (compile-time completeness)
+R2-12  TENSOR_BACKEND.Hot_kernels roster (13, ensured)
+R1-17  distinct_output added on reduce, argmax_mask, reduce_to_shape, slice, add_slice, concat, gather_rows,
+       scatter_add_rows, cross_entropy, cross_entropy_grad; adamw_update distinct storages
+R2-07  derivative table in the TENSOR_BACKEND note (relu'(0) = 0, exact GELU); param_unused on unary, unary_derivative, TENSOR.unary
+R2-03  INDEX_TENSOR.address exported {TENSOR_BACKEND}; put restricted {SIMPLE_TENSOR, INDEX_TENSOR, TOKEN_BATCHER, TENSOR_BACKEND, SAFETENSORS_FILE}
+R1-15  INDEX_TENSOR.has_value_other_than; some_target on TENSOR.cross_entropy and both cross-entropy kernels
+R1-10  exact shapes: matmul / matmul_transposed / transposed via with_dim; maximum scalar_from_vector
+R1-11  fresh_storage and not_a_parameter on data-producing ops; zeros_like/ones_like same_backend; detached same_shape
+R1-12  detached require live
+R2-10  reshape/permute/slice renamed reshaped/permuted/sliced
+R2-04  TENSOR.dropout removed (composition: x * mask); TENSOR_RANDOM draw_index + last_index (next_index removed);
+       fills take an untracked TENSOR (commands); SIMPLE_TENSOR.normal removed (same CQS defect; consistency extension, declared)
+R2-11  create {TENSOR} on all 18 op classes
+R1-07  GRAD_STORE has_id, ids_model faithful (for_all), common_ids_shaped, merge require not_self and compatible
+R1-08  clip_global_norm require finite; ensure untouched_when_within
+R1-14  TENSOR_OPTIMIZER.distinct_ids; make require distinct; step require shaped and live; ensure same_schedule
+R1-16  TENSOR_RANDOM fill ensures (uniform range, keep-mask values); SAFETENSORS_FILE load nothing_on_error,
+       save distinct_names and no_reserved_name; __metadata__ noted
+R1-19  TENSOR_SHAPE.dims_model faithful
+R2-13  SCOOP note in TENSOR and SIMPLE_TENSOR
+R3-05  CPU_STORAGE.block note (realloc on release; no address held across release)
+
+Compile after the pass: ec.sh check simple_tensor 0/0, check simple_tensor_tests 0/0
+  (one fix on the way: across over MML_SET is VOIT(1) -> for_all (agent has_id); oracle gotcha recorded)
+Freeze snapshot: evidence/phase4-contracts-before.txt (1,012 lines of full clause text, 46 files),
+  made by .eiffel-workflow/tools/contract_snapshot.sh (full clause text, not just keyword lines)

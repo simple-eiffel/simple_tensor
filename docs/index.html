@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>simple_tensor - Training for Eiffel</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" type="image/png" href="images/logo.svg">
+</head>
+<body>
+    <header>
+        <div class="logo-container">
+            <img src="images/logo.svg" alt="simple_* logo" class="logo">
+        </div>
+        <h1>simple_tensor</h1>
+        <p class="tagline">Tensors, Automatic Gradients, Optimizers and Training in Pure Eiffel</p>
+        <div class="badges">
+            <span class="badge badge-rfc">Service Layer</span>
+            <span class="badge badge-version">v0.1.0</span>
+            <span class="badge badge-license">MIT</span>
+        </div>
+    </header>
+
+    <nav>
+        <ul>
+            <li><a href="#overview">Overview</a></li>
+            <li><a href="#quick-start">Quick Start</a></li>
+            <li><a href="#features">Features</a></li>
+            <li><a href="#api">API Reference</a></li>
+            <li><a href="#measured">Measured</a></li>
+        </ul>
+    </nav>
+
+    <main>
+        <section id="overview">
+            <h2>Overview</h2>
+            <p>
+                <strong>simple_tensor</strong> trains neural networks in Eiffel. Eiffel owns everything:
+                the hot loops are C inline inside Eiffel classes, and every fast kernel has a plain-Eiffel
+                twin that checks it. No Python or outside machine-learning library runs.
+            </p>
+            <p>
+                Status: milestone M1 (CPU training) is complete. The Vulkan GPU backend is milestone M3.
+            </p>
+        </section>
+
+        <section id="quick-start">
+            <h2>Quick Start</h2>
+            <h3>Installation</h3>
+            <pre><code>&lt;library name="simple_tensor" location="$SIMPLE_EIFFEL/simple_tensor/simple_tensor.ecf"/&gt;</code></pre>
+
+            <h3>A network learns XOR</h3>
+            <p>This is the library's test <code>test_readme_quick_start</code>, verbatim.</p>
+            <pre><code>local
+    f: SIMPLE_TENSOR
+    r: TENSOR_RANDOM
+    x, y, w1, b1, w2, b2, l_loss: TENSOR
+    opt: ADAMW_OPTIMIZER
+    step: INTEGER
+do
+    create f.make
+    create r.make (42)
+    x := f.from_array (&lt;&lt;0, 0,  0, 1,  1, 0,  1, 1&gt;&gt;, &lt;&lt;4, 2&gt;&gt;)
+    y := f.from_array (&lt;&lt;0, 1, 1, 0&gt;&gt;, &lt;&lt;4, 1&gt;&gt;)
+    w1 := f.zeros (&lt;&lt;2, 8&gt;&gt;);  r.fill_normal (w1, 0.0, 1.0);  w1 := f.parameter (w1)
+    b1 := f.parameter (f.zeros (&lt;&lt;1, 8&gt;&gt;))
+    w2 := f.zeros (&lt;&lt;8, 1&gt;&gt;);  r.fill_normal (w2, 0.0, 0.5);  w2 := f.parameter (w2)
+    b2 := f.parameter (f.zeros (&lt;&lt;1, 1&gt;&gt;))
+    create opt.make (create {ARRAYED_LIST [TENSOR]}.make_from_array (&lt;&lt;w1, b1, w2, b2&gt;&gt;),
+        create {CONSTANT_SCHEDULE}.make (0.05), 0.9, 0.999, 1.0e-8, 0.0)
+    from step := 1 until step &gt; 500 loop
+        l_loss := ((x.matmul (w1) + b1).hyperbolic_tangent.matmul (w2) + b2).mean_squared_error (y)
+        opt.step (l_loss.backward)
+        step := step + 1
+    end
+end</code></pre>
+        </section>
+
+        <section id="features">
+            <h2>Features</h2>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h4>Autograd</h4>
+                    <p>34 operations, each with its backward; intermediates freed as backward runs</p>
+                </div>
+                <div class="feature-card">
+                    <h4>Optimizers</h4>
+                    <p>SGD and AdamW, warmup-cosine schedule, gradient clipping</p>
+                </div>
+                <div class="feature-card">
+                    <h4>Twin-checked kernels</h4>
+                    <p>Every C kernel is tested against a plain-Eiffel twin</p>
+                </div>
+                <div class="feature-card">
+                    <h4>safetensors</h4>
+                    <p>Load F32/F16/BF16 and save F32 Hugging Face weights</p>
+                </div>
+                <div class="feature-card">
+                    <h4>Language-model data</h4>
+                    <p>Token batcher; embeddings; causal mask; cross-entropy</p>
+                </div>
+                <div class="feature-card">
+                    <h4>SCOOP-safe</h4>
+                    <p>Kernels are blocking externals; the GC never waits on them</p>
+                </div>
+            </div>
+        </section>
+
+        <section id="api">
+            <h2>API Reference</h2>
+
+            <div class="api-section">
+                <h3>Creating tensors (SIMPLE_TENSOR)</h3>
+                <table>
+                    <tr><th>Feature</th><th>Description</th></tr>
+                    <tr><td><code>make</code> / <code>make_with_backend (b)</code></td><td>Facade on the CPU backend, or on <code>b</code></td></tr>
+                    <tr><td><code>zeros (dims)</code>, <code>ones (dims)</code>, <code>filled (dims, v)</code></td><td>New tensors</td></tr>
+                    <tr><td><code>scalar (v)</code>, <code>from_array (values, dims)</code></td><td>From values</td></tr>
+                    <tr><td><code>parameter (t)</code></td><td>A trainable copy of <code>t</code></td></tr>
+                    <tr><td><code>indices (values, dims)</code>, <code>causal_mask (n)</code></td><td>Integer tensors for token ids and masks</td></tr>
+                </table>
+            </div>
+
+            <div class="api-section">
+                <h3>Operations (TENSOR)</h3>
+                <table>
+                    <tr><th>Group</th><th>Features</th></tr>
+                    <tr><td>Elementwise (broadcast)</td><td><code>+ - * /</code>, <code>negated</code>, <code>scaled</code>, <code>shifted</code></td></tr>
+                    <tr><td>Unary</td><td><code>exponential</code>, <code>logarithm</code>, <code>square_root</code>, <code>hyperbolic_tangent</code>, <code>sigmoid</code>, <code>relu</code>, <code>gelu</code>, <code>silu</code></td></tr>
+                    <tr><td>Reductions</td><td><code>sum</code>, <code>mean</code>, <code>maximum</code> (axis, keep), <code>sum_all</code>, <code>mean_all</code>, <code>reduced_to</code></td></tr>
+                    <tr><td>Shape</td><td><code>reshaped</code>, <code>permuted</code>, <code>transposed</code>, <code>sliced</code>, <code>concatenated</code></td></tr>
+                    <tr><td>Linear algebra</td><td><code>matmul</code> (batched), <code>matmul_transposed (o, ta, tb)</code></td></tr>
+                    <tr><td>Neural</td><td><code>softmax</code>, <code>log_softmax</code>, <code>masked_fill</code>, <code>gathered_rows</code></td></tr>
+                    <tr><td>Losses</td><td><code>cross_entropy (targets, ignore)</code>, <code>mean_squared_error</code></td></tr>
+                    <tr><td>Autograd and memory</td><td><code>backward</code> (returns a GRAD_STORE), <code>detached</code>, <code>release</code></td></tr>
+                </table>
+            </div>
+
+            <div class="api-section">
+                <h3>Training</h3>
+                <table>
+                    <tr><th>Class</th><th>Use</th></tr>
+                    <tr><td><code>ADAMW_OPTIMIZER</code></td><td><code>make (params, schedule, beta1, beta2, eps, decay)</code>; <code>step (grads)</code></td></tr>
+                    <tr><td><code>SGD_OPTIMIZER</code></td><td><code>make (params, schedule)</code>; <code>step (grads)</code></td></tr>
+                    <tr><td><code>WARMUP_COSINE_SCHEDULE</code></td><td><code>make (peak, warmup, total, floor_ratio)</code></td></tr>
+                    <tr><td><code>GRAD_STORE</code></td><td><code>gradient (t)</code>, <code>global_norm</code>, <code>clip_global_norm (max)</code>, <code>has_non_finite</code></td></tr>
+                    <tr><td><code>TENSOR_RANDOM</code></td><td><code>make (seed)</code>; <code>fill_uniform</code>, <code>fill_normal</code>, <code>fill_keep_mask</code></td></tr>
+                    <tr><td><code>TOKEN_BATCHER</code></td><td><code>make (tokens, block, batch, random)</code>; <code>forth</code>; <code>batch.inputs</code>, <code>batch.targets</code></td></tr>
+                    <tr><td><code>SAFETENSORS_FILE</code></td><td><code>make (facade)</code>; <code>load (path)</code>, <code>tensor (name)</code>, <code>save (path, names, tensors)</code></td></tr>
+                </table>
+            </div>
+        </section>
+
+        <section id="measured">
+            <h2>Measured</h2>
+            <div class="api-section">
+                <table>
+                    <tr><th>What (single thread, lean build)</th><th>Result</th></tr>
+                    <tr><td>matmul 256&times;768 &middot; 768&times;768</td><td>29.6 GFLOP/s (transpose A 30.2, transpose B 26.0)</td></tr>
+                    <tr><td>Training step, 256&times;768 &rarr; 768 layer</td><td>44 ms</td></tr>
+                    <tr><td>Gradient checks, every operation</td><td>worst error 1.3e-4</td></tr>
+                    <tr><td>C kernels vs. plain-Eiffel twins</td><td>worst relative error 2.1e-7</td></tr>
+                    <tr><td>Memory over 1,000 steps (about 457 MB churned)</td><td>rose 17 MB</td></tr>
+                    <tr><td>Worst GC stall on another SCOOP processor during training</td><td>5 ms</td></tr>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>Part of the <a href="https://github.com/simple-eiffel">simple_*</a> library collection</p>
+        <p class="copyright">MIT License - Copyright (c) 2026, Larry Rix</p>
+    </footer>
+</body>
+</html>

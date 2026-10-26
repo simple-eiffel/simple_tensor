@@ -1,0 +1,28 @@
+# Phase 5 Test Evidence
+# Project: D:\prod\simple_tensor
+# Date: 2026-10-26
+# Build: ec.sh test -config simple_tensor.ecf -target simple_tensor_tests (all assertions on, finalized
+#        with contracts); log error/warning lines 0. Run log: evidence/phase5-run.log
+
+Added this phase (contract-derived and boundary tests):
+  test_readme_quick_start               README example verbatim; XOR loss 1.8e-15 after 500 AdamW steps
+  test_like_factories_and_backend_copy  zeros_like / ones_like / to_backend round trip CPU -> REFERENCE -> CPU
+  test_grad_store_scale_clip_merge      scale_all, clip_global_norm (cap reached, direction kept, within-cap untouched), merge
+  test_sgd_hand_trace                   w := 0.8 w twice = [0.64, -1.28, 3.2] on CPU and REFERENCE
+  test_random_index_and_dropout_mask    1,000 draws cover 0..9; keep mask kept fraction 0.73..0.77 of 10,000
+  test_storage_sharing_guards_release   reshaped view shares storage; copy releases; source intact
+  test_preconditions_reject_misuse      10 misuse cases -> PRECONDITION_VIOLATION; control call is not flagged
+
+Test output (abridged; full in phase5-run.log):
+  51 gradient checks run, worst |analytic - numeric| = 0.00013241395302754366
+  twin parity: worst relative error 2.0861625671386719e-07
+  memory: rise over start 17 MB while churning ~457 MB (budget 16 MB)
+  GC probe: worst root allocation 5 ms with training on another processor, baseline 5 ms
+  XOR after 500 AdamW steps: loss 1.77636e-15
+  Results: 24 passed, 0 failed
+
+Tests run: 24
+Tests passed: 24
+Coverage review: prompts/phase5-coverage-review.md (public-feature sweep: no public feature left unexercised;
+  known gaps listed there for /eiffel.harden)
+# Status: PASS

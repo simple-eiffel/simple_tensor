@@ -1,0 +1,41 @@
+# Phase 2 Review Chain Evidence
+# Project: D:\prod\simple_tensor
+# Date: 2026-10-25
+# ROE: General Research ROE v1.1 (2026-10-12), read in full by the adjudicator; ROE-CARD.md void (digests v1.0), so seats read the rulebook
+
+Review method: debate cycle - seats: RED-1, RED-2, RED-3 (by lens, parallel), BLUE, adjudicator - mode: code-lite with lens-split RED (budget previewed to Larry, approved "run it")
+Budget: RED-1 debate-seat/Sonnet 91,448 tok - RED-2 debate-seat/Sonnet 101,048 - RED-3 debate-seat/Sonnet 79,238 - BLUE debate-seat/Sonnet 46,845 - adjudicator debate-adjudicator/Opus 141,764 - seats total 460,343 (main-thread execution record not metered)   Session model: Opus 5.5
+Adversarial condition: C3 (with executed-evidence rule, gated 2026-10-11: C2 for CL-2, CL-6, E-1)
+Classes reviewed: 43 src + 5 testing
+Executed: ec.sh check (library + tests targets), ec.sh test (tests), test run 15/15 (13 empty); spike R-1 (once per SCOOP processor: 1000/1000); S-4 re-run x2 (raw logs: spikes/memory_pressure/s4_run_2026-10-25.log, s4_run_2026-10-25_per_iteration.log)
+Findings: 39 raised + 1 adjudicator (A-01) -> sustained 23 / narrowed 16 / overruled 0 (A-01 sustained and confirmed by E-5b: 221 MB)
+By severity (after ruling): HIGH 3  MEDIUM 19  LOW 14  INFO 4
+HIGH issues: R1-02 (stored gradient aliases a released view), R1-03 / R2-02 (release frees shared storage; saved_live)
+Escalated to /eiffel.debate: none
+Do-not-assume entries: 9
+
+Verdict: .eiffel-workflow/review/04 - VERDICT.md
+Synopsis: .eiffel-workflow/synopsis.md
+Ruled findings: .eiffel-workflow/evidence/phase2-claude-response.md
+Larry's gate: APPROVED 2026-10-25 ("yes to all five, keep going"): verdict adopted; C2 granted; ROE card regen; Q7 annotation; spike EIFGENs deletion
+
+Conditions landed (2026-10-25, after the gate):
+  1 G-A: TENSOR_STORAGE.owner_count/is_shared/note_owner (monotone); TENSOR.storage_shared; release require not_shared and not_a_parameter;
+         TENSOR_OP.saved_live (redefined in UNARY, SOFTMAX, MAX for saved storages); backward require saved_values_live;
+         GRAD_STORE.accumulate ensure copied
+  2 G-C: tensor_op doctrine "compute on i.detached"; accumulate require tracked_owner; TENSOR.backward ensure
+         exactly_the_reachable_leaves (|=| grad_leaf_ids_model) and graph_intact
+  3 G-B: STORAGE_BUDGET largest_request + invariant bounded + frames + set_budget keeps_bound;
+         STORAGE_BUDGET_ACCESS (shared per-thread once) inherited by CPU_STORAGE and INDEX_TENSOR (both note allocations)
+  4 R1-13: TENSOR_SHAPE.fits / Max_elements (INTEGER_64 product, early exit) guarding make, reshaped, product_of, CPU_STORAGE.make,
+           SIMPLE_TENSOR.valid_dims; R3-01 TENSOR_RANDOM.make seed_valid; R1-09 TENSOR_SHAPE.is_equal ensure then exact
+  5 Register re-specification (CL-1/4/5/7/10); tests test_gc_probe_under_10ms (AC-7), test_cpu_matmul_throughput (AC-9);
+    intent-v2 Q7 annotated (A-01, AC-8 method, release optional); ROE-CARD regenerated as v1.1
+  6 Recompile: ec.sh check simple_tensor 0/0; check simple_tensor_tests 0/0; test build 0/0 (incl. error C/LNK);
+    run: Results: 17 passed, 0 failed (15 still empty Phase-1 skeletons)
+
+Pipeline notes:
+- An attempted S-4 edit hung on a stray `python3 -` (stdin); the task was stopped, the file was unchanged, and no Python process was left running; the edit was redone with the Edit tool.
+- The adjudicator deleted review/spikes/once_per_processor/EIFGENs (R-1 has no raw log file; its output is pasted in E-4).
+
+# Status: COMPLETE

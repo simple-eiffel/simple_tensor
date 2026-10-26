@@ -1,0 +1,36 @@
+# Pre-Phase Research Evidence
+# Project: D:\prod\simple_tensor
+# Date: 2026-10-25
+
+Research completed: yes
+Steps completed: 7/7
+Recommendation: BUILD
+Confidence: HIGH (buildable); MEDIUM (GPU speed, pending spike S-2)
+
+References cited: 24
+Alternatives researched: 9 (micrograd, llm.c, tinygrad, ggml/ggml-opt, Burn, candle, Kompute, needle-rs, Cactus reference trainer)
+Risks identified: 10
+
+Executed evidence:
+  S-1 matmul spike (spikes/matmul), 256x768 * 768x768 REAL_32, single thread
+    ec.sh test (DBC kept): plain Eiffel 0.93 GFLOP/s | C inline 25.0 GFLOP/s
+    ec.sh release lean   : plain Eiffel 4.03 GFLOP/s | C inline 26.6 GFLOP/s
+    cause in test build  : SPECIAL.item as a call + RTHOOK per element (generated C ma14.c, F26_486)
+
+  S-3 memory/GC spike (spikes/memory_gc), lean, SCOOP; worst root allocation while another processor computes ~3 s
+    unmarked one long C call on SPECIAL : 2,744 ms
+    C blocking one call on C heap       : 7 ms
+    250 short unmarked C calls          : 2,746 ms
+    plain Eiffel loop, no allocation    : 3,129 ms
+    same + blocking no-op every 4 rows  : 6 ms (no speed cost)
+    plain Eiffel ikj4: SPECIAL 4.06 GFLOP/s, MANAGED_POINTER 2.37 GFLOP/s
+  S-2 GPU spike (spikes/gpu_matmul), RTX 5070 Ti, simple_vulkan AS-IS (host-visible buffers, submit+wait per dispatch)
+    256x768x768  : CPU C 8 ms | naive 0.9 ms 336 GFLOP/s | 16x16 tiled 0.7 ms 431 GFLOP/s | max rel err 3.1e-4
+    2048^3       : CPU C 555 ms | naive 69 ms 249 GFLOP/s | tiled 51.8 ms 332 GFLOP/s | max rel err 4.0e-3
+    readback 16 MB: 69 ms (host-visible memory read by CPU, ~240 MB/s) -> gap: device-local + cached staging
+    shaders compiled at run time by simple_shaderc (needs %VULKAN_SDK%\Bin on PATH for shaderc_shared.dll)
+
+Contested forks: none remaining. D-002 settled by executed spike S-3 (blocking + C heap: 7 ms worst root allocation vs 2,744 ms unmarked; plain Eiffel loop 3,129 ms, 6 ms with a blocking no-op GC point). /eiffel.debate not run (executed evidence).
+Larry gate D-004: APPROVED 2026-10-25 (option 2)
+
+# Status: COMPLETE

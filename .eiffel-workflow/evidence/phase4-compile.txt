@@ -1,0 +1,53 @@
+# Phase 4 Implementation Evidence
+# Project: D:\prod\simple_tensor
+# Date: 2026-10-25
+
+Scope: M1 (tasks T0-T13 of tasks.md); T14 (release hygiene) remains.
+
+## Final compile and run (ec.sh modes; counts read from the per-run LOG)
+ec.sh check  -target simple_tensor (library, all classes): Syntax and type check passed; error/warning lines 0
+ec.sh test   -target simple_tensor_tests: Built F_code/simple_tensor.exe; error/warning lines 0 (incl. error C####, LNK####)
+ec.sh release -target simple_tensor_bench: lean + dbc built; 0 errors
+Stubs left: src 0, tests 0
+
+## Test run (F_code/simple_tensor.exe): Results: 17 passed, 0 failed (no empty tests)
+  51 gradient checks (every primitive, both operands, all matmul transpose/batch cases), worst |analytic - numeric| = 1.3e-4
+  twin parity, 15 comparisons covering all 13 hot kernels (forward and backward), worst relative error 2.1e-7
+  AdamW 3 steps = PyTorch-docs hand trace (expected values: .eiffel-workflow/tools/expected_values.py), both backends, < 1e-5
+  WARMUP_COSINE = rixgpt.py lr_at verbatim at steps 0, 75, 150, 2575, 5000 (< 1e-15)
+  determinism: bit-identical repeated runs on REFERENCE and CPU; CPU tracks the oracle within 1e-4
+  safetensors: F32 round trip exact; F16/BF16 edge values (signed zero, subnormals, +-inf, NaN, max); __metadata__ skipped; missing file reported
+  AC-8 memory: 1,000 steps under a 16 MB budget, private memory sampled every step: rise 17 MB while churning ~457 MB
+  AC-7 GC probe: training on another processor (4 steps, 4.4 s, covering the 2 s window): worst root allocation 5 ms vs baseline 7 ms
+  Mutation tests (each reverted): mul backward broken -> every gradient check fails; sqrt derivative broken -> only "sqrt" fails;
+    C tanh derivative broken -> twin parity fails at "unary_derivative"
+
+## AC-9 bench (lean, F_code/simple_tensor_lean.exe of target simple_tensor_bench, one thread)
+  matmul 256x768 . 768x768   : 10 ms, 29.6 GFLOP/s   (gate >= 20: PASS)
+  matmul transpose A          : 10 ms, 30.2 GFLOP/s   (was 1.9 before the outer-product loop)
+  matmul transpose B          : 11 ms, 26.0 GFLOP/s   (was 3.7 before transposing B into scratch)
+  training step (fwd + bwd + AdamW, 3 matmuls): 44 ms (was 164 ms)
+
+## Contract changes during implementation
+Freeze snapshot: phase4-contracts-before.txt (full clause text). After: phase4-contracts-after.txt. Diff: phase4-contracts-diff.txt.
+Result: ADDITIONS ONLY, all on features that did not exist at the freeze:
+  CPU_BACKEND.address (private helper)          require cpu
+  SAFETENSORS_FILE.reset / fail (private)        ensure clean / flagged
+  TENSOR_DTYPE_CODEC.f32_copy (NEW PUBLIC)       require source, sized, live  (F32 load path)
+  TENSOR_OP.shaped_for / leaf_over (private)     require/ensure
+No frozen clause was changed or removed.
+Verdict-authorized amendments landed BEFORE the freeze: phase4-amendments.txt.
+
+## Gap fills (branches in the owning libraries, UNCOMMITTED, awaiting Larry)
+  G-3 simple_math  feature/tanh-erf-sigmoid   0.2.0  47/47  (dependents simple_calculus, simple_linalg, simple_statistics type-check)
+  G-2 simple_randomizer feature/random-gaussian 1.1.0 28/28  (dependent simple_web type-checks; its 40 obsolete calls pre-exist)
+  G-5 simple_file  feature/bulk-binary-io     1.2.0  29/29  (no inheritors; simple_markdown type-checks; runner now prints failing tag)
+  G-6 (long-period RNG) not yet: needed before recipe-scale dropout in M2.
+
+## Lessons recorded in the oracle this phase
+  MML_SET is not ITERABLE (use for_all); body locals must not reuse a frozen contract's across name;
+  `expanded' and `reference' are keywords (tuple labels and feature names too); agent closed args cannot be nested calls;
+  clean rebuild (rm EIFGENs) after a supplier library changes (stale simple_math).
+
+Contract changes detected: additions on new features only (listed above)
+# Status: PASS

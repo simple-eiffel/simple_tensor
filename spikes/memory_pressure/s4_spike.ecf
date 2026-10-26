@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<system xmlns="http://www.eiffel.com/developers/xml/configuration/22" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.eiffel.com/developers/xml/configuration/22 http://www.eiffel.com/developers/xml/configuration/22/configuration.xsd" name="s4_spike" uuid="6D1F8A37-2C94-4E6B-9A05-B7E3C1D82F40">
+	<target name="s4_spike">
+		<root class="S4_APP" feature="make"/>
+		<option warning="error" void_safety="all">
+			<assertions precondition="true" postcondition="false" invariant="false"/>
+		</option>
+		<setting name="total_order_on_reals" value="true"/>
+		<setting name="console_application" value="true"/>
+		<capability>
+			<concurrency support="none"/>
+			<void_safety support="all"/>
+		</capability>
+		<external_library location="psapi.lib"/>
+		<library name="base" location="$ISE_LIBRARY/library/base/base.ecf"/>
+		<cluster name="spike" location="./"/>
+	</target>
+</system>

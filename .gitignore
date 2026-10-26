@@ -1,0 +1,33 @@
+# Eiffel build artifacts
+EIFGENs/
+Documentation/
+
+# Compiled files
+*.melted
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Backup files
+*.swp
+*.bak
+*~
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+*.epr
+*.log
+
+# Evidence logs are part of the record
+!.eiffel-workflow/evidence/*.log
+!spikes/**/*.log
+exception_trace.log

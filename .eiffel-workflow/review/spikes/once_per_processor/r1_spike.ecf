@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<system xmlns="http://www.eiffel.com/developers/xml/configuration/22" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.eiffel.com/developers/xml/configuration/22 http://www.eiffel.com/developers/xml/configuration/22/configuration.xsd" name="r1_spike" uuid="8B4E2D19-5C73-4A06-91F8-3D6A7C2E0B54">
+	<target name="r1_spike">
+		<root class="R1_APP" feature="make"/>
+		<option warning="error" void_safety="all">
+			<assertions precondition="true" postcondition="true" invariant="true"/>
+		</option>
+		<setting name="console_application" value="true"/>
+		<setting name="total_order_on_reals" value="true"/>
+		<capability>
+			<concurrency support="scoop" use="scoop"/>
+			<void_safety support="all"/>
+		</capability>
+		<library name="base" location="$ISE_LIBRARY/library/base/base.ecf"/>
+		<cluster name="spike" location="./"/>
+	</target>
+</system>

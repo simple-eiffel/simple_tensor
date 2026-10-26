@@ -1,0 +1,42 @@
+# Phase 6 Hardening Evidence
+# Project: D:\prod\simple_tensor
+# Date: 2026-10-26
+# Build: ec.sh test -target simple_tensor_tests (all assertions on); log error/warning lines 0. Run log: phase6-run.log
+
+## MML Hardening
+MML dependency: present since Phase 1 (simple_mml in simple_tensor.ecf)
+Model queries: 6 (TENSOR.grad_leaf_ids_model, GRAD_STORE.ids_model, ADAMW state_ids_model,
+  TENSOR_OPTIMIZER.parameters_model, SAFETENSORS_FILE.names_model, TENSOR_SHAPE.dims_model); |=| frame conditions: 7
+Added this phase: none needed; STORAGE_BUDGET.set_budget re-specified (below)
+
+## SCOOP Consumer Integration
+Consumer test created: yes (test_consumer/, a separate SCOOP application training on a worker processor, then removed)
+Consumer compilation: PASS, 0 errors / 0 warnings; ran: "consumer: loss 0.00124832"
+VUAR(2) errors fixed: N/A (none)
+
+## Adversarial Testing (7 tests added; suite 24 -> 31)
+  test_adversarial_safetensors        14 hostile files (bad lengths, non-JSON, bad dtype/dims, overflow,
+                                      offsets disagreeing / past end / negative, 3-byte file); reader recovers after
+  test_adversarial_numerics           softmax of 1000s, log_softmax of -1e4, confident-miss CE = 2000 with finite
+                                      gradient, saturating sigmoid/tanh/gelu/silu, exp(100) flagged; both backends
+  test_backward_twice_diamond_and_deep_chain   repeat backward equal; diamond 2x+3; 5,000-op chain
+  test_two_trainers_on_separate_processors     two SCOOP processors + root: 0.910236 three times, bit-identical
+  test_stress_many_small_steps        5,000 steps under a 4 MB budget; loss 0.0689 -> 0.0494; memory rise 0 MB
+  test_batcher_tightest_corpus        block + 2 tokens: one start; one token fewer refused by precondition
+  test_budget_lowered_mid_run         set_budget collects when lowered below the noted bytes
+
+## Defects found and fixed
+  D6-1 SAFETENSORS_FILE.load_tensors: a negative data_offset was accepted. [-8, 0] silently loaded header bytes
+       as tensor data; [-1000, -992] would reach SIMPLE_FILE.read_block's non_negative precondition (an exception,
+       not a reported error). Fix: refuse begin < 0 or end < begin ("data_offsets out of the data buffer").
+  D6-2 STORAGE_BUDGET.set_budget: precondition keeps_bound made lowering the budget mid-run fail unless the
+       caller first read allocated_since_collect. Fix (contract re-specified, precondition WEAKENED, so every
+       existing caller stays valid): when the noted bytes exceed the new bound, collect first. New postconditions
+       count_kept_when_within / collected_when_over replace count_unchanged / collections_unchanged.
+  Runner: TEST_APP now prints the failing exception's class, feature and tag.
+
+## Contract diff since Phase 4 (phase4-contracts-after.txt -> phase6-contracts-after.txt)
+  Only STORAGE_BUDGET.set_budget (D6-2 above). No other clause changed.
+
+Results: 31 passed, 0 failed
+# Status: PASS

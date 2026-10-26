@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<system xmlns="http://www.eiffel.com/developers/xml/configuration/22" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.eiffel.com/developers/xml/configuration/22 http://www.eiffel.com/developers/xml/configuration/22/configuration.xsd" name="s3_spike" uuid="9C2A6E14-3B7F-4D58-8E01-A4F6B2D9C371">
+	<target name="s3_spike">
+		<root class="S3_APP" feature="make"/>
+		<option warning="error" void_safety="all">
+			<assertions precondition="true" postcondition="false" invariant="false"/>
+		</option>
+		<setting name="total_order_on_reals" value="true"/>
+		<setting name="console_application" value="true"/>
+		<setting name="inlining" value="true"/>
+		<setting name="inlining_size" value="10"/>
+		<capability>
+			<concurrency support="scoop" use="scoop"/>
+			<void_safety support="all"/>
+		</capability>
+		<library name="base" location="$ISE_LIBRARY/library/base/base.ecf"/>
+		<cluster name="spike" location="./"/>
+	</target>
+</system>
