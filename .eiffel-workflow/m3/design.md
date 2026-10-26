@@ -54,6 +54,6 @@ GLSL 460 with `GL_EXT_buffer_reference`; all buffer addresses and sizes in push 
 
 ## Gates (M3b)
 1. Twin parity: every hot kernel GPU = REFERENCE within 1e-4 relative (forward and backward cases of the M1 suite, unchanged).
-2. Gradient checks pass with the facade on VULKAN_BACKEND.
+2. ~~Gradient checks on VULKAN_BACKEND~~ WITHDRAWN 2026-10-26: GRADIENT_CHECKER requires the reference backend by design (spec 03 A-S04; autograd is backend-independent). Replaced by cold-kernel twin parity: on CPU the cold kernels are HOST_BACKEND code shared with the oracle, but on the GPU they are new GLSL, so they get their own parity cases.
 3. `fallback_count` = 0 for every kernel a RixGPT training step uses.
 4. A RixGPT-sized step (embedding, attention, MLP, cross-entropy, AdamW) is timed on the GPU against CPU_BACKEND.

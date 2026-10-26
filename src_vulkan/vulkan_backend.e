@@ -1,13 +1,14 @@
 note
 	description: "[
 		GPU backend on Vulkan (M3b; design .eiffel-workflow/m3/design.md).
-		Kernels record into the context's open batch; the GPU runs at the first host
-		read (download, a mirror refresh, sum_of_squares, has_non_finite) or index upload.
+		Every kernel is a GLSL compute shader (VULKAN_KERNELS) reading its buffers by
+		device address. Kernels record into the context's open batch; the GPU runs at
+		the first host read (download, a mirror refresh, sum_of_squares,
+		has_non_finite) or index upload, so a training step costs a few flushes.
 
-		Every kernel works from day one: a kernel without its GLSL yet runs as a HOST
-		FALLBACK (download the inputs, run CPU_BACKEND's kernel, write the result back),
-		counted in `fallback_counts'. GLSL kernels replace fallbacks one by one, each
-		proven by twin parity against REFERENCE_BACKEND.
+		Shapes of rank above 6 (beyond the push-constant stride arrays) run as a HOST
+		FALLBACK through CPU_BACKEND, counted in `fallback_counts'; M3b gate 3 requires
+		none during a RixGPT step.
 	]"
 	author: "Larry Rix"
 
@@ -44,6 +45,8 @@ feature {NONE} -- Initialization
 			create host
 			create fallback_counts.make (16)
 			create programs.make (32)
+			create kernels
+			create shaderc.make
 		ensure
 			context_set: context = a_context
 			no_fallbacks_yet: fallback_counts.is_empty
@@ -87,6 +90,9 @@ feature -- Access
 			end
 		end
 
+	Max_rank: INTEGER = 6
+			-- Largest rank the stride-array kernels take.
+
 feature -- Storage
 
 	new_storage (a_count: INTEGER): TENSOR_STORAGE
@@ -128,26 +134,23 @@ feature -- Transfer
 			end
 		end
 
-feature -- Kernels: fill and copy (native: recorded transfer commands)
+feature -- Kernels: fill and copy (recorded transfer commands)
 
 	fill (a_out: TENSOR_STORAGE; a_value: REAL_32)
 		local
 			l_word: MANAGED_POINTER
-			ok: BOOLEAN
 		do
 			create l_word.make (4)
 			l_word.put_real_32 (a_value, 0)
-			ok := gpu (a_out).buffer.record_fill (0, gpu (a_out).byte_count, l_word.read_natural_32 (0))
-			check recorded: ok end
+			last_record_ok := gpu (a_out).buffer.record_fill (0, gpu (a_out).byte_count, l_word.read_natural_32 (0))
+			check recorded: last_record_ok end
 			gpu (a_out).invalidate
 		end
 
 	copy_values (a, a_out: TENSOR_STORAGE)
-		local
-			ok: BOOLEAN
 		do
-			ok := gpu (a).buffer.record_copy_to (gpu (a_out).buffer, 0, 0, gpu (a).byte_count)
-			check recorded: ok end
+			last_record_ok := gpu (a).buffer.record_copy_to (gpu (a_out).buffer, 0, 0, gpu (a).byte_count)
+			check recorded: last_record_ok end
 			gpu (a_out).invalidate
 		end
 
@@ -155,232 +158,504 @@ feature -- Kernels: elementwise
 
 	binary (a_kind: INTEGER; a, b, a_out: TENSOR_STORAGE; a_shape_a, a_shape_b, a_shape_out: TENSOR_SHAPE)
 		local
+			p: VULKAN_PUSH_BLOCK
 			ha, hb, hout: CPU_STORAGE
 		do
-			note_fallback ("binary")
-			ha := to_host (a); hb := to_host (b); hout := host_out (a_out, False)
-			host.binary (a_kind, ha, hb, hout, a_shape_a, a_shape_b, a_shape_out)
-			back (hout, a_out); free (ha); free (hb)
+			if a_shape_a ~ a_shape_out and a_shape_b ~ a_shape_out then
+				create p.make
+				p.address (addr (a)); p.address (addr (b)); p.address (addr (a_out))
+				p.natural (a_out.count); p.integer (a_kind)
+				run ("binary_same", p, a_out.count)
+			elseif a_shape_out.rank <= Max_rank then
+				create p.make
+				p.address (addr (a)); p.address (addr (b)); p.address (addr (a_out))
+				p.natural (a_out.count); p.integer (a_kind); p.integer (a_shape_out.rank)
+				p.integers_6 (a_shape_out.to_array)
+				p.integers_6 (broadcast_strides (a_shape_out, a_shape_a))
+				p.integers_6 (broadcast_strides (a_shape_out, a_shape_b))
+				run ("binary_broadcast", p, a_out.count)
+			else
+				note_fallback ("binary")
+				ha := to_host (a); hb := to_host (b); hout := host_out (a_out, False)
+				host.binary (a_kind, ha, hb, hout, a_shape_a, a_shape_b, a_shape_out)
+				back (hout, a_out); free (ha); free (hb)
+			end
+			gpu (a_out).invalidate
 		end
 
 	unary (a_kind: INTEGER; a, a_out: TENSOR_STORAGE; a_param: REAL_32)
 		local
-			ha, hout: CPU_STORAGE
+			p: VULKAN_PUSH_BLOCK
 		do
-			note_fallback ("unary")
-			ha := to_host (a); hout := host_out (a_out, False)
-			host.unary (a_kind, ha, hout, a_param)
-			back (hout, a_out); free (ha)
+			create p.make
+			p.address (addr (a)); p.address (addr (a_out))
+			p.natural (a.count); p.integer (a_kind); p.real (a_param)
+			run ("unary", p, a.count)
+			gpu (a_out).invalidate
 		end
 
 	unary_derivative (a_kind: INTEGER; a, a_y, a_out: TENSOR_STORAGE; a_param: REAL_32)
 		local
-			ha, hy, hout: CPU_STORAGE
+			p: VULKAN_PUSH_BLOCK
 		do
-			note_fallback ("unary_derivative")
-			ha := to_host (a); hy := to_host (a_y); hout := host_out (a_out, False)
-			host.unary_derivative (a_kind, ha, hy, hout, a_param)
-			back (hout, a_out); free (ha); free (hy)
+			create p.make
+			p.address (addr (a)); p.address (addr (a_y)); p.address (addr (a_out))
+			p.natural (a.count); p.integer (a_kind); p.real (a_param)
+			run ("unary_derivative", p, a.count)
+			gpu (a_out).invalidate
 		end
 
 feature -- Kernels: reductions
 
 	reduce (a_kind: INTEGER; a, a_out: TENSOR_STORAGE; a_shape_a: TENSOR_SHAPE; a_axis: INTEGER)
 		local
-			ha, hout: CPU_STORAGE
+			p: VULKAN_PUSH_BLOCK
+			l_outer, l_inner: INTEGER
 		do
-			note_fallback ("reduce")
-			ha := to_host (a); hout := host_out (a_out, False)
-			host.reduce (a_kind, ha, hout, a_shape_a, a_axis)
-			back (hout, a_out); free (ha)
+			l_outer := outer_size (a_shape_a, a_axis)
+			l_inner := inner_size (a_shape_a, a_axis)
+			create p.make
+			p.address (addr (a)); p.address (addr (a_out))
+			p.natural (l_outer); p.natural (a_shape_a.dim (a_axis)); p.natural (l_inner); p.integer (a_kind)
+			run ("reduce", p, l_outer * l_inner)
+			gpu (a_out).invalidate
 		end
 
 	argmax_mask (a, a_out: TENSOR_STORAGE; a_shape_a: TENSOR_SHAPE; a_axis: INTEGER)
 		local
-			ha, hout: CPU_STORAGE
+			p: VULKAN_PUSH_BLOCK
+			l_outer, l_inner: INTEGER
 		do
-			note_fallback ("argmax_mask")
-			ha := to_host (a); hout := host_out (a_out, False)
-			host.argmax_mask (ha, hout, a_shape_a, a_axis)
-			back (hout, a_out); free (ha)
+			l_outer := outer_size (a_shape_a, a_axis)
+			l_inner := inner_size (a_shape_a, a_axis)
+			create p.make
+			p.address (addr (a)); p.address (addr (a_out))
+			p.natural (l_outer); p.natural (a_shape_a.dim (a_axis)); p.natural (l_inner)
+			run ("argmax_mask", p, l_outer * l_inner)
+			gpu (a_out).invalidate
 		end
 
 	reduce_to_shape (a, a_out: TENSOR_STORAGE; a_from, a_to: TENSOR_SHAPE)
 		local
+			p: VULKAN_PUSH_BLOCK
 			ha, hout: CPU_STORAGE
+			k, k_to, l_kept: INTEGER
 		do
-			note_fallback ("reduce_to_shape")
-			ha := to_host (a); hout := host_out (a_out, False)
-			host.reduce_to_shape (ha, hout, a_from, a_to)
-			back (hout, a_out); free (ha)
+			if a_from.rank <= Max_rank then
+				from k := 1 until k > a_from.rank loop
+					k_to := k - (a_from.rank - a_to.rank)
+					if k_to >= 1 and then a_to.dim (k_to) = a_from.dim (k) then
+						l_kept := l_kept | (1 |<< (k - 1))
+					end
+					k := k + 1
+				end
+				create p.make
+				p.address (addr (a)); p.address (addr (a_out))
+				p.natural (a_out.count); p.integer (a_from.rank); p.integer (l_kept)
+				p.integers_6 (a_from.to_array)
+				run ("reduce_to", p, a_out.count)
+			else
+				note_fallback ("reduce_to_shape")
+				ha := to_host (a); hout := host_out (a_out, False)
+				host.reduce_to_shape (ha, hout, a_from, a_to)
+				back (hout, a_out); free (ha)
+			end
+			gpu (a_out).invalidate
 		end
 
 	sum_of_squares (a: TENSOR_STORAGE): REAL_64
-		local
-			ha: CPU_STORAGE
 		do
-			note_fallback ("sum_of_squares")
-			ha := to_host (a)
-			Result := host.sum_of_squares (ha)
-			free (ha)
+			Result := norm_partials (a).sum
 		end
 
 	has_non_finite (a: TENSOR_STORAGE): BOOLEAN
-		local
-			ha: CPU_STORAGE
 		do
-			note_fallback ("has_non_finite")
-			ha := to_host (a)
-			Result := host.has_non_finite (ha)
-			free (ha)
+			Result := norm_partials (a).bad
 		end
 
 feature -- Kernels: linear algebra
 
 	matmul (a, b, a_out: TENSOR_STORAGE; a_batch, a_m, a_k, a_n: INTEGER; a_ta, a_tb, a_b_shared: BOOLEAN)
 		local
-			ha, hb, hout: CPU_STORAGE
+			p: VULKAN_PUSH_BLOCK
 		do
-			note_fallback ("matmul")
-			ha := to_host (a); hb := to_host (b); hout := host_out (a_out, False)
-			host.matmul (ha, hb, hout, a_batch, a_m, a_k, a_n, a_ta, a_tb, a_b_shared)
-			back (hout, a_out); free (ha); free (hb)
+			create p.make
+			p.address (addr (a)); p.address (addr (b)); p.address (addr (a_out))
+			p.natural (a_m); p.natural (a_k); p.natural (a_n)
+			p.natural (a_ta.to_integer); p.natural (a_tb.to_integer); p.natural (a_b_shared.to_integer)
+			run_groups ("matmul", p, (a_n + 15) // 16, (a_m + 15) // 16, a_batch)
+			gpu (a_out).invalidate
 		end
 
 feature -- Kernels: neural
 
 	softmax (a, a_out: TENSOR_STORAGE; a_rows, a_cols: INTEGER; a_log: BOOLEAN)
 		local
-			ha, hout: CPU_STORAGE
+			p: VULKAN_PUSH_BLOCK
 		do
-			note_fallback ("softmax")
-			ha := to_host (a); hout := host_out (a_out, False)
-			host.softmax (ha, hout, a_rows, a_cols, a_log)
-			back (hout, a_out); free (ha)
+			create p.make
+			p.address (addr (a)); p.address (addr (a_out))
+			p.natural (a_rows); p.natural (a_cols); p.natural (a_log.to_integer)
+			run ("softmax", p, a_rows)
+			gpu (a_out).invalidate
 		end
 
 	masked_fill (a: TENSOR_STORAGE; a_mask: INDEX_TENSOR; a_out: TENSOR_STORAGE; a_shape_a: TENSOR_SHAPE; a_value: REAL_32)
 		local
+			p: VULKAN_PUSH_BLOCK
+			l_mask: VULKAN_DEVICE_BUFFER
 			ha, hout: CPU_STORAGE
 		do
-			note_fallback ("masked_fill")
-			ha := to_host (a); hout := host_out (a_out, False)
-			host.masked_fill (ha, a_mask, hout, a_shape_a, a_value)
-			back (hout, a_out); free (ha)
+			if a_shape_a.rank <= Max_rank then
+				l_mask := index_buffer (a_mask)
+				create p.make
+				p.address (addr (a)); p.address (l_mask.address); p.address (addr (a_out))
+				p.natural (a.count); p.real (a_value); p.integer (a_shape_a.rank)
+				p.integers_6 (a_shape_a.to_array)
+				p.integers_6 (broadcast_strides (a_shape_a, a_mask.shape))
+				run ("masked_fill", p, a.count)
+				l_mask.release_deferred
+			else
+				note_fallback ("masked_fill")
+				ha := to_host (a); hout := host_out (a_out, False)
+				host.masked_fill (ha, a_mask, hout, a_shape_a, a_value)
+				back (hout, a_out); free (ha)
+			end
+			gpu (a_out).invalidate
 		end
 
 feature -- Kernels: shape
 
 	permute (a, a_out: TENSOR_STORAGE; a_shape_a: TENSOR_SHAPE; a_order: ARRAY [INTEGER])
 		local
+			p: VULKAN_PUSH_BLOCK
+			l_in, l_mapped: ARRAY [INTEGER]
+			k: INTEGER
 			ha, hout: CPU_STORAGE
 		do
-			note_fallback ("permute")
-			ha := to_host (a); hout := host_out (a_out, False)
-			host.permute (ha, hout, a_shape_a, a_order)
-			back (hout, a_out); free (ha)
+			if a_shape_a.rank <= Max_rank then
+				l_in := row_major_strides (a_shape_a)
+				create l_mapped.make_filled (0, 1, a_shape_a.rank)
+				from k := 1 until k > a_shape_a.rank loop
+					l_mapped [k] := l_in [a_order [a_order.lower + k - 1]]
+					k := k + 1
+				end
+				create p.make
+				p.address (addr (a)); p.address (addr (a_out))
+				p.natural (a.count); p.integer (a_shape_a.rank)
+				p.integers_6 (a_shape_a.permuted (a_order).to_array)
+				p.integers_6 (l_mapped)
+				run ("permute", p, a.count)
+			else
+				note_fallback ("permute")
+				ha := to_host (a); hout := host_out (a_out, False)
+				host.permute (ha, hout, a_shape_a, a_order)
+				back (hout, a_out); free (ha)
+			end
+			gpu (a_out).invalidate
 		end
 
 	slice (a, a_out: TENSOR_STORAGE; a_shape_a: TENSOR_SHAPE; a_axis, a_start, a_length: INTEGER)
 		local
-			ha, hout: CPU_STORAGE
+			p: VULKAN_PUSH_BLOCK
 		do
-			note_fallback ("slice")
-			ha := to_host (a); hout := host_out (a_out, False)
-			host.slice (ha, hout, a_shape_a, a_axis, a_start, a_length)
-			back (hout, a_out); free (ha)
+			create p.make
+			p.address (addr (a)); p.address (addr (a_out))
+			p.natural (a_out.count); p.natural (a_shape_a.dim (a_axis)); p.natural (inner_size (a_shape_a, a_axis))
+			p.natural (a_start - 1); p.natural (a_length)
+			run ("slice", p, a_out.count)
+			gpu (a_out).invalidate
 		end
 
 	add_slice (a_part, a_out: TENSOR_STORAGE; a_shape_out: TENSOR_SHAPE; a_axis, a_start, a_length: INTEGER)
 		local
-			hp, hout: CPU_STORAGE
+			p: VULKAN_PUSH_BLOCK
 		do
-			note_fallback ("add_slice")
-			hp := to_host (a_part); hout := host_out (a_out, True)
-			host.add_slice (hp, hout, a_shape_out, a_axis, a_start, a_length)
-			back (hout, a_out); free (hp)
+			create p.make
+			p.address (addr (a_part)); p.address (addr (a_out))
+			p.natural (a_part.count); p.natural (a_shape_out.dim (a_axis)); p.natural (inner_size (a_shape_out, a_axis))
+			p.natural (a_start - 1); p.natural (a_length)
+			run ("add_slice", p, a_part.count)
+			gpu (a_out).invalidate
 		end
 
 	concat (a, b, a_out: TENSOR_STORAGE; a_shape_a, a_shape_b: TENSOR_SHAPE; a_axis: INTEGER)
 		local
-			ha, hb, hout: CPU_STORAGE
+			p: VULKAN_PUSH_BLOCK
 		do
-			note_fallback ("concat")
-			ha := to_host (a); hb := to_host (b); hout := host_out (a_out, False)
-			host.concat (ha, hb, hout, a_shape_a, a_shape_b, a_axis)
-			back (hout, a_out); free (ha); free (hb)
+			create p.make
+			p.address (addr (a)); p.address (addr (b)); p.address (addr (a_out))
+			p.natural (a_out.count); p.natural (a_shape_a.dim (a_axis)); p.natural (a_shape_b.dim (a_axis))
+			p.natural (inner_size (a_shape_a, a_axis))
+			run ("concat", p, a_out.count)
+			gpu (a_out).invalidate
 		end
 
 feature -- Kernels: indexing
 
 	gather_rows (a_table: TENSOR_STORAGE; a_indices: INDEX_TENSOR; a_out: TENSOR_STORAGE; a_rows, a_dim: INTEGER)
 		local
-			ht, hout: CPU_STORAGE
+			p: VULKAN_PUSH_BLOCK
+			l_ix: VULKAN_DEVICE_BUFFER
 		do
-			note_fallback ("gather_rows")
-			ht := to_host (a_table); hout := host_out (a_out, False)
-			host.gather_rows (ht, a_indices, hout, a_rows, a_dim)
-			back (hout, a_out); free (ht)
+			l_ix := index_buffer (a_indices)
+			create p.make
+			p.address (addr (a_table)); p.address (l_ix.address); p.address (addr (a_out))
+			p.natural (a_indices.count); p.natural (a_dim)
+			run ("gather_rows", p, a_indices.count * a_dim)
+			l_ix.release_deferred
+			gpu (a_out).invalidate
 		end
 
 	scatter_add_rows (a_grad: TENSOR_STORAGE; a_indices: INDEX_TENSOR; a_out: TENSOR_STORAGE; a_rows, a_dim: INTEGER)
 		local
-			hg, hout: CPU_STORAGE
+			p: VULKAN_PUSH_BLOCK
+			l_ix: VULKAN_DEVICE_BUFFER
 		do
-			note_fallback ("scatter_add_rows")
-			hg := to_host (a_grad); hout := host_out (a_out, True)
-			host.scatter_add_rows (hg, a_indices, hout, a_rows, a_dim)
-			back (hout, a_out); free (hg)
+			l_ix := index_buffer (a_indices)
+			create p.make
+			p.address (addr (a_grad)); p.address (l_ix.address); p.address (addr (a_out))
+			p.natural (a_indices.count); p.natural (a_dim); p.natural (a_out.count // a_dim)
+			run ("scatter_add_rows", p, a_out.count)
+			l_ix.release_deferred
+			gpu (a_out).invalidate
 		end
 
 feature -- Kernels: losses
 
 	cross_entropy (a_logits: TENSOR_STORAGE; a_targets: INDEX_TENSOR; a_ignore: INTEGER; a_out: TENSOR_STORAGE; a_rows, a_classes: INTEGER)
 		local
-			hl, hout: CPU_STORAGE
+			p: VULKAN_PUSH_BLOCK
+			l_t, l_rows: VULKAN_DEVICE_BUFFER
 		do
-			note_fallback ("cross_entropy")
-			hl := to_host (a_logits); hout := host_out (a_out, False)
-			host.cross_entropy (hl, a_targets, a_ignore, hout, a_rows, a_classes)
-			back (hout, a_out); free (hl)
+			l_t := index_buffer (a_targets)
+			create l_rows.make (context, a_rows.to_integer_64 * 4)
+			create p.make
+			p.address (addr (a_logits)); p.address (l_t.address); p.address (l_rows.address)
+			p.natural (a_rows); p.natural (a_classes); p.integer (a_ignore)
+			run ("ce_rows", p, a_rows)
+			create p.make
+			p.address (l_rows.address); p.address (addr (a_out))
+			p.natural (a_rows); p.real (1.0 / valid_targets (a_targets, a_ignore))
+			run_groups ("ce_sum", p, 1, 1, 1)
+			l_t.release_deferred
+			l_rows.release_deferred
+			gpu (a_out).invalidate
 		end
 
 	cross_entropy_grad (a_logits: TENSOR_STORAGE; a_targets: INDEX_TENSOR; a_ignore: INTEGER; a_out: TENSOR_STORAGE; a_rows, a_classes: INTEGER; a_scale: REAL_32)
 		local
-			hl, hout: CPU_STORAGE
+			p: VULKAN_PUSH_BLOCK
+			l_t: VULKAN_DEVICE_BUFFER
 		do
-			note_fallback ("cross_entropy_grad")
-			hl := to_host (a_logits); hout := host_out (a_out, False)
-			host.cross_entropy_grad (hl, a_targets, a_ignore, hout, a_rows, a_classes, a_scale)
-			back (hout, a_out); free (hl)
+			l_t := index_buffer (a_targets)
+			create p.make
+			p.address (addr (a_logits)); p.address (l_t.address); p.address (addr (a_out))
+			p.natural (a_rows); p.natural (a_classes); p.integer (a_ignore)
+			p.real (a_scale / valid_targets (a_targets, a_ignore))
+			run ("ce_grad", p, a_rows)
+			l_t.release_deferred
+			gpu (a_out).invalidate
 		end
 
 feature -- Kernels: optimizers
 
 	sgd_update (a_param, a_grad: TENSOR_STORAGE; a_rate: REAL_64)
 		local
-			hp, hg: CPU_STORAGE
+			p: VULKAN_PUSH_BLOCK
 		do
-			note_fallback ("sgd_update")
-			hp := host_out (a_param, True); hg := to_host (a_grad)
-			host.sgd_update (hp, hg, a_rate)
-			back (hp, a_param); free (hg)
+			create p.make
+			p.address (addr (a_param)); p.address (addr (a_grad))
+			p.natural (a_param.count); p.real (a_rate)
+			run ("sgd", p, a_param.count)
+			gpu (a_param).invalidate
 		end
 
 	adamw_update (a_param, a_grad, a_m, a_v: TENSOR_STORAGE; a_rate, a_beta1, a_beta2, a_eps, a_decay: REAL_64; a_step: INTEGER)
 		local
-			hp, hg, hm, hv: CPU_STORAGE
+			p: VULKAN_PUSH_BLOCK
 		do
-			note_fallback ("adamw_update")
-			hp := host_out (a_param, True); hg := to_host (a_grad); hm := host_out (a_m, True); hv := host_out (a_v, True)
-			host.adamw_update (hp, hg, hm, hv, a_rate, a_beta1, a_beta2, a_eps, a_decay, a_step)
-			back (hp, a_param); back (hm, a_m); back (hv, a_v); free (hg)
+			create p.make
+			p.address (addr (a_param)); p.address (addr (a_grad)); p.address (addr (a_m)); p.address (addr (a_v))
+			p.natural (a_param.count)
+			p.real (a_rate); p.real (a_beta1); p.real (a_beta2); p.real (a_eps); p.real (a_decay)
+			p.real (1.0 - a_beta1 ^ a_step); p.real (1.0 - a_beta2 ^ a_step)
+			run ("adamw", p, a_param.count)
+			gpu (a_param).invalidate; gpu (a_m).invalidate; gpu (a_v).invalidate
 		end
 
-feature {NONE} -- Host fallback
+feature -- Status
+
+	last_record_ok: BOOLEAN
+			-- Did the last recorded command go into the batch?
+
+feature {NONE} -- Dispatch
+
+	kernels: VULKAN_KERNELS
+
+	shaderc: SIMPLE_SHADERC
+
+	programs: HASH_TABLE [VULKAN_ADDRESS_PIPELINE, STRING_8]
+			-- Compiled kernels by name.
+
+	pipeline (a_name: STRING_8): VULKAN_ADDRESS_PIPELINE
+			-- Kernel `a_name', compiled on first use.
+		require
+			known: kernels.has (a_name)
+		local
+			s: VULKAN_SHADER
+			l_failure: DEVELOPER_EXCEPTION
+		do
+			if attached programs.item (a_name) as l_p then
+				Result := l_p
+			elseif attached shaderc.compile_compute (kernels.source (a_name)) as l_code then
+				create s.make_from_memory (context, l_code.item, l_code.count.to_integer_64)
+				create Result.make (context, s)
+				s.dispose
+				programs.put (Result, a_name)
+			else
+				l_failure := create {DEVELOPER_EXCEPTION}
+				l_failure.set_description ("GLSL kernel " + a_name + " failed to compile: " + shaderc.last_error)
+				l_failure.raise
+				check unreachable: False then end
+			end
+		ensure
+			cached: programs.has (a_name)
+		end
+
+	run (a_name: STRING_8; p: VULKAN_PUSH_BLOCK; a_threads: INTEGER)
+			-- Record `a_name' over `a_threads' threads (256 per group, 2-D group grid).
+		local
+			l_groups, gx, gy: INTEGER
+		do
+			l_groups := ((a_threads + 255) // 256).max (1)
+			gx := l_groups.min (65535)
+			gy := (l_groups + gx - 1) // gx
+			run_groups (a_name, p, gx, gy, 1)
+		end
+
+	run_groups (a_name: STRING_8; p: VULKAN_PUSH_BLOCK; gx, gy, gz: INTEGER)
+		do
+			last_record_ok := pipeline (a_name).record (p.block.item, p.size, gx, gy, gz)
+			check recorded: last_record_ok end
+		end
+
+	norm_partials (a: TENSOR_STORAGE): TUPLE [sum: REAL_64; bad: BOOLEAN]
+			-- Sum of squares and any-non-finite of `a': 256 GPU partials, summed here.
+		local
+			p: VULKAN_PUSH_BLOCK
+			l_part: VULKAN_DEVICE_BUFFER
+			l_host: MANAGED_POINTER
+			i: INTEGER
+			l_sum: REAL_64
+			l_bad: BOOLEAN
+		do
+			create l_part.make (context, 512 * 4)
+			create p.make
+			p.address (addr (a)); p.address (l_part.address); p.natural (a.count)
+			run_groups ("norm_partials", p, 256, 1, 1)
+			create l_host.make (512 * 4)
+			last_record_ok := l_part.read (l_host.item, 512 * 4, 0)
+			check read: last_record_ok end
+			from i := 0 until i = 256 loop
+				l_sum := l_sum + l_host.read_real_32 (8 * i)
+				l_bad := l_bad or l_host.read_real_32 (8 * i + 4) /= 0.0
+				i := i + 1
+			end
+			l_part.release_deferred
+			Result := [l_sum, l_bad]
+		end
+
+	index_buffer (ix: INDEX_TENSOR): VULKAN_DEVICE_BUFFER
+			-- `ix' uploaded to the GPU (a write: it runs the recorded batch first).
+			-- The caller releases it (deferred) after recording its use.
+		do
+			create Result.make (context, ix.count.to_integer_64 * 4)
+			last_record_ok := Result.write (ix.address, ix.count.to_integer_64 * 4, 0)
+			check written: last_record_ok end
+		end
+
+	valid_targets (a_targets: INDEX_TENSOR; a_ignore: INTEGER): INTEGER
+			-- Targets not equal to `a_ignore' (at least one: cross_entropy's precondition).
+		local
+			i: INTEGER
+		do
+			from i := 0 until i = a_targets.count loop
+				if a_targets.item (i) /= a_ignore then
+					Result := Result + 1
+				end
+				i := i + 1
+			end
+			Result := Result.max (1)
+		end
+
+feature {NONE} -- Geometry
+
+	addr (s: TENSOR_STORAGE): NATURAL_64
+		do
+			Result := gpu (s).address
+		end
+
+	broadcast_strides (a_out, a_in: TENSOR_SHAPE): ARRAY [INTEGER]
+			-- Per dim of `a_out': the stride of `a_in' along it (0 where `a_in' broadcasts
+			-- or has no such dim). As CPU_BACKEND.
+		local
+			k, k_in, s: INTEGER
+		do
+			create Result.make_filled (0, 1, a_out.rank)
+			s := 1
+			from k := a_out.rank until k = 0 loop
+				k_in := k - (a_out.rank - a_in.rank)
+				if k_in >= 1 then
+					if a_in.dim (k_in) /= 1 then
+						Result [k] := s
+					end
+					s := s * a_in.dim (k_in)
+				end
+				k := k - 1
+			end
+		end
+
+	row_major_strides (a_shape: TENSOR_SHAPE): ARRAY [INTEGER]
+		local
+			k, s: INTEGER
+		do
+			create Result.make_filled (0, 1, a_shape.rank)
+			s := 1
+			from k := a_shape.rank until k = 0 loop
+				Result [k] := s
+				s := s * a_shape.dim (k)
+				k := k - 1
+			end
+		end
+
+	outer_size (a_shape: TENSOR_SHAPE; a_axis: INTEGER): INTEGER
+			-- Product of the dims before `a_axis'.
+		local
+			k: INTEGER
+		do
+			Result := 1
+			from k := 1 until k = a_axis loop
+				Result := Result * a_shape.dim (k)
+				k := k + 1
+			end
+		end
+
+	inner_size (a_shape: TENSOR_SHAPE; a_axis: INTEGER): INTEGER
+			-- Product of the dims after `a_axis'.
+		local
+			k: INTEGER
+		do
+			Result := 1
+			from k := a_axis + 1 until k > a_shape.rank loop
+				Result := Result * a_shape.dim (k)
+				k := k + 1
+			end
+		end
+
+feature {NONE} -- Host fallback (rank above Max_rank)
 
 	host: CPU_BACKEND
-			-- Runs the kernels that have no GLSL yet.
 
 	note_fallback (a_kernel: STRING_8)
 		do
@@ -427,11 +702,6 @@ feature {NONE} -- Host fallback
 		do
 			h.release
 		end
-
-feature {NONE} -- Programs
-
-	programs: HASH_TABLE [VULKAN_ADDRESS_PIPELINE, STRING_8]
-			-- Compiled kernels by name.
 
 invariant
 	addressable: context.is_valid and context.has_device_address
