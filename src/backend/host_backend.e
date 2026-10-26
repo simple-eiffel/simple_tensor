@@ -246,6 +246,37 @@ feature -- Kernels: cold
 			end
 		end
 
+feature -- Kernels: random fill
+
+	fill_random (a_out: TENSOR_STORAGE; a_kind: INTEGER; p1, p2: REAL_64; a_seed, a_position: NATURAL_64)
+		local
+			l_philox: SIMPLE_PHILOX
+			i: INTEGER
+			p, l_threshold: NATURAL_64
+			v, u1, u2, l_keep_value: REAL_64
+		do
+			create l_philox.make (a_seed, 0)
+			p := a_position
+			l_threshold := (p1 * 4294967296.0).ceiling_real_64.truncated_to_integer_64.to_natural_64
+			l_keep_value := (1.0 / p1).truncated_to_real
+			from i := 0 until i = a_out.count loop
+				if a_kind = Uniform_fill_kind then
+					v := p1 + (p2 - p1) * ((l_philox.word (p + i.to_natural_64) |>> 8).to_real_64 / 16777216.0)
+				elseif a_kind = Normal_fill_kind then
+					u1 := ((l_philox.word (p + 2 * i.to_natural_64) |>> 8).to_real_64 + 1.0) / 16777216.0
+					u2 := (l_philox.word (p + 2 * i.to_natural_64 + 1) |>> 8).to_real_64 / 16777216.0
+					v := p1 + p2 * {DOUBLE_MATH}.sqrt (-2.0 * {DOUBLE_MATH}.log (u1)) * {DOUBLE_MATH}.cosine (2.0 * {DOUBLE_MATH}.pi * u2)
+				elseif l_philox.word (p + i.to_natural_64).to_natural_64 < l_threshold then
+					v := l_keep_value
+				else
+					v := 0.0
+				end
+				a_out.put (v.truncated_to_real, i)
+				i := i + 1
+				pace (i)
+			end
+		end
+
 feature {NONE} -- Geometry helpers
 
 	source_index (a_flat: INTEGER; a_out, a_in: TENSOR_SHAPE): INTEGER

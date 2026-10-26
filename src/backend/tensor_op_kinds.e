@@ -57,4 +57,15 @@ feature -- Reduction kinds
 			Result := Sum_kind <= k and k <= Max_kind
 		end
 
+feature -- Random fill kinds (TENSOR_BACKEND.fill_random)
+
+	Uniform_fill_kind: INTEGER = 41
+	Normal_fill_kind: INTEGER = 42
+	Keep_mask_fill_kind: INTEGER = 43
+
+	is_fill_kind (k: INTEGER): BOOLEAN
+		do
+			Result := Uniform_fill_kind <= k and k <= Keep_mask_fill_kind
+		end
+
 end

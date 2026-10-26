@@ -30,6 +30,9 @@ feature {NONE} -- Initialization
 			mlp_step (cpu, "CPU", 4096, 768, 3072, 2)
 			mlp_step (gpu, "GPU", 4096, 768, 3072, 10)
 			matmul_only (gpu, "GPU", 2048, 2048, 2048, 20)
+			if attached {VULKAN_BACKEND} gpu.backend as v then
+				print ("GPU buffer pool: " + v.context.pool_hits.out + " allocations served from the pool, " + (v.context.pooled_bytes // (1024 * 1024)).out + " MB pooled%N")
+			end
 		end
 
 feature {NONE} -- Steps

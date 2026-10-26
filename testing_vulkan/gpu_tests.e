@@ -81,8 +81,37 @@ feature -- GPU tests
 			t.compare_named ("argmax_mask (max backward)", agent twin_argmax)
 			t.compare_named ("sgd_update (2 steps)", agent twin_sgd)
 			t.compare_named ("fill + copy", agent twin_fill_copy)
+			t.compare_named ("fill_random (uniform, normal, keep mask)", agent twin_random)
 			print ("      GPU twin parity (cold): worst relative error " + t.worst_relative_error.out + " (" + t.last_report + ")%N")
 			assert ("GPU cold kernels match the oracle within 1e-4 (" + t.last_report + ")", t.within (1.0e-4))
+		end
+
+	test_gpu_keep_mask_bit_identical
+			-- A 100,000-element dropout mask drawn on the GPU equals the oracle's element for
+			-- element (the keep test is integer-exact), after 1,000 words were already drawn.
+		local
+			rg, ro: TENSOR_RANDOM
+			mg, mo: TENSOR
+			g, o: ARRAY [REAL_32]
+			i, l_kept: INTEGER
+		do
+			create rg.make (9001)
+			create ro.make (9001)
+			rg.fill_uniform (gpu.zeros (<<1000>>), 0.0, 1.0)
+			ro.fill_uniform (oracle.zeros (<<1000>>), 0.0, 1.0)
+			mg := gpu.zeros (<<100_000>>)
+			mo := oracle.zeros (<<100_000>>)
+			rg.fill_keep_mask (mg, 0.8)
+			ro.fill_keep_mask (mo, 0.8)
+			g := mg.to_array
+			o := mo.to_array
+			from i := 1 until i > 100_000 loop
+				assert ("mask element " + i.out, g [i] = o [i])
+				if g [i] /= 0.0 then l_kept := l_kept + 1 end
+				i := i + 1
+			end
+			print ("      GPU keep mask: 100,000 elements identical to the oracle's, " + l_kept.out + " kept (p = 0.8)%N")
+			assert ("kept fraction", 79_500 <= l_kept and l_kept <= 80_500)
 		end
 
 	test_gpu_training_tracks_oracle
@@ -189,6 +218,19 @@ feature {NONE} -- Cold-kernel twin cases
 			x := seeded (f, <<3, 5>>, -1.0, 1.0, 95)
 			Result := f.filled (<<7>>, -0.375).concatenated (f.parameter (x).reshaped (<<15>>), 1)
 				.concatenated (x.zeros_like.reshaped (<<15>>), 1).concatenated (x.ones_like.reshaped (<<15>>), 1)
+		end
+
+	twin_random (f: SIMPLE_TENSOR): TENSOR
+		local
+			r: TENSOR_RANDOM
+			u, n, m: TENSOR
+		do
+			create r.make (77)
+			r.draw_index (50)
+			u := f.zeros (<<3, 5>>); r.fill_uniform (u, -2.0, 3.0)
+			n := f.zeros (<<4, 4>>); r.fill_normal (n, 0.5, 2.0)
+			m := f.zeros (<<64>>); r.fill_keep_mask (m, 0.8)
+			Result := u.reshaped (<<15>>).concatenated (n.reshaped (<<16>>), 1).concatenated (m, 1)
 		end
 
 feature {NONE} -- Subject

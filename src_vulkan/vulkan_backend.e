@@ -458,6 +458,32 @@ feature -- Kernels: losses
 			gpu (a_out).invalidate
 		end
 
+feature -- Kernels: random fill
+
+	fill_random (a_out: TENSOR_STORAGE; a_kind: INTEGER; p1, p2: REAL_64; a_seed, a_position: NATURAL_64)
+		local
+			p: VULKAN_PUSH_BLOCK
+			l_threshold: NATURAL_64
+			l_keep_value: REAL_64
+		do
+			if a_kind = Keep_mask_fill_kind then
+				l_threshold := (p1 * 4294967296.0).ceiling_real_64.truncated_to_integer_64.to_natural_64
+				l_keep_value := 1.0 / p1
+			end
+			create p.make
+			p.address (addr (a_out))
+			p.natural (a_out.count); p.integer (a_kind); p.real (p1); p.real (p2); p.real (l_keep_value)
+			p.word (a_seed.as_natural_32); p.word ((a_seed |>> 32).as_natural_32)
+			p.word (a_position.as_natural_32); p.word ((a_position |>> 32).as_natural_32)
+			if l_threshold >= 0x1_0000_0000 then
+				p.word (0); p.word (1)
+			else
+				p.word (l_threshold.as_natural_32); p.word (0)
+			end
+			run ("fill_random", p, a_out.count)
+			gpu (a_out).invalidate
+		end
+
 feature -- Kernels: optimizers
 
 	sgd_update (a_param, a_grad: TENSOR_STORAGE; a_rate: REAL_64)

@@ -1,9 +1,9 @@
 note
 	description: "[
 		Seeded randomness for initialization, dropout masks and batching.
-		Commands advance the philox; queries never do (CQS, Phase 2 verdict
+		Commands advance the generator; queries never do (CQS, Phase 2 verdict
 		R2-04): `draw_index' then `last_index'; fills write into an untracked
-		tensor. Long fills pass GC points.
+		tensor, drawn by its backend (TENSOR_BACKEND.fill_random).
 
 		Generator: Philox4x32-10 (SIMPLE_PHILOX, simple_randomizer 1.2.0; gap G-6),
 		keyed by `seed', stream 0. It is counter-based, so every value has a fixed
@@ -113,47 +113,29 @@ feature {NONE} -- Implementation
 	Keep_mask: INTEGER = 3
 
 	fill_each (a_tensor: TENSOR; a_distribution: INTEGER; p1, p2: REAL_64)
-			-- Fill element by element from the words at `position' onward:
-			-- uniform [p1, p2), normal (p1, p2), keep mask (keep probability p1).
+			-- Fill on the tensor's own backend (TENSOR_BACKEND.fill_random: on the GPU the
+			-- words are drawn by a kernel), starting at `position', then advance past the
+			-- words used: one per element, two for normal.
 		local
-			i, n: INTEGER
-			l_start: NATURAL_64
-			v, u1, u2: REAL_64
+			l_start, n: NATURAL_64
+			l_kind: INTEGER
 		do
-			n := a_tensor.shape.count
+			n := a_tensor.shape.count.to_natural_64
 			l_start := philox.position
-			from i := 0 until i = n loop
-				inspect a_distribution
-				when Uniform then
-					v := p1 + (p2 - p1) * philox.unit_of (philox.word (l_start + i.to_natural_64))
-				when Normal then
-						-- u1 in (0, 1] so the logarithm is finite.
-					u1 := 1.0 - philox.unit_of (philox.word (l_start + 2 * i.to_natural_64))
-					u2 := philox.unit_of (philox.word (l_start + 2 * i.to_natural_64 + 1))
-					v := p1 + p2 * math.sqrt (-2.0 * math.log (u1)) * math.cos (2.0 * math.pi * u2)
-				else
-					if philox.unit_of (philox.word (l_start + i.to_natural_64)) < p1 then
-						v := 1.0 / p1
-					else
-						v := 0.0
-					end
-				end
-				a_tensor.storage.put (v.truncated_to_real, i)
-				i := i + 1
-				if i \\ 4096 = 0 then
-					gc_point
-				end
-			end
-			if a_distribution = Normal then
-				philox.go_to (l_start + 2 * n.to_natural_64)
+			inspect a_distribution
+			when Uniform then
+				l_kind := a_tensor.backend.Uniform_fill_kind
+			when Normal then
+				l_kind := a_tensor.backend.Normal_fill_kind
 			else
-				philox.go_to (l_start + n.to_natural_64)
+				l_kind := a_tensor.backend.Keep_mask_fill_kind
 			end
-		end
-
-	math: SIMPLE_MATH
-		once
-			create Result.make
+			a_tensor.backend.fill_random (a_tensor.storage, l_kind, p1, p2, seed.to_natural_64, l_start)
+			if a_distribution = Normal then
+				philox.go_to (l_start + 2 * n)
+			else
+				philox.go_to (l_start + n)
+			end
 		end
 
 end

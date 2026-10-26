@@ -5,8 +5,8 @@ note
 		mirror, downloaded whole on the first read after a change, so a contract that walks
 		every element costs one transfer, not one per element. Writes by kernels call
 		`invalidate'; `put' writes through. Memory is noted in the per-processor
-		STORAGE_BUDGET and freed by `release' or by the collector (`dispose'), both through
-		the deferred release, so the collector never waits on the GPU.
+		STORAGE_BUDGET; `release' and the collector (`dispose') recycle the buffer into the
+		context's pool (simple_vulkan 0.3.0), so the collector never waits on the GPU.
 	]"
 	author: "Larry Rix"
 
@@ -107,7 +107,7 @@ feature {TENSOR_BACKEND, TENSOR, TENSOR_OP, TENSOR_OPTIMIZER, SAFETENSORS_FILE, 
 	release
 		do
 			if not is_released then
-				buffer.release_deferred
+				buffer.recycle
 				is_released := True
 				is_mirror_valid := False
 				mirror := Void
@@ -186,7 +186,7 @@ feature {NONE} -- Implementation
 			-- Collector: hand the GPU memory back without waiting on the GPU.
 		do
 			if not is_released then
-				buffer.release_deferred
+				buffer.recycle
 				is_released := True
 			end
 		end

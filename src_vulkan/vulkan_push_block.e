@@ -56,6 +56,17 @@ feature -- Packing
 			grown: size = old size + 4
 		end
 
+	word (v: NATURAL_32)
+			-- A uint field given as its 32 bits.
+		require
+			room: size + 4 <= Capacity
+		do
+			block.put_natural_32 (v, size)
+			size := size + 4
+		ensure
+			grown: size = old size + 4
+		end
+
 	integer (v: INTEGER)
 			-- An int field.
 		require

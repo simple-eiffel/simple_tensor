@@ -115,7 +115,44 @@ feature {NONE} -- Kernel bodies
 			Result.put (Concat, "concat")
 			Result.put (Argmax_mask, "argmax_mask")
 			Result.put (Reduce_to, "reduce_to")
+			Result.put (Fill_random, "fill_random")
 		end
+
+	Fill_random: STRING_8 = "[
+		layout(push_constant) uniform P { F o; uint n; int kind; float p1; float p2; float keep_value;
+			uint key0; uint key1; uint pos_lo; uint pos_hi; uint thr; uint all_keep; } p;
+		uvec4 philox(uvec4 c, uvec2 k) {
+			for (int r = 0; r < 10; r++) {
+				if (r > 0) { k.x += 0x9E3779B9u; k.y += 0xBB67AE85u; }
+				uint hi0; uint lo0; uint hi1; uint lo1;
+				umulExtended(0xD2511F53u, c.x, hi0, lo0);
+				umulExtended(0xCD9E8D57u, c.z, hi1, lo1);
+				c = uvec4(hi1 ^ c.y ^ k.x, lo1, hi0 ^ c.w ^ k.y, lo0);
+			}
+			return c;
+		}
+		uint word(uint off) {
+			uint lo = p.pos_lo + off;
+			uint hi = p.pos_hi + ((lo < p.pos_lo) ? 1u : 0u);
+			uvec4 b = philox(uvec4((lo >> 2) | (hi << 30), hi >> 2, 0u, 0u), uvec2(p.key0, p.key1));
+			uint j = lo & 3u;
+			return (j == 0u) ? b.x : ((j == 1u) ? b.y : ((j == 2u) ? b.z : b.w));
+		}
+		void main() {
+			uint i = gid(); if (i >= p.n) return;
+			float v;
+			if (p.kind == 41) {
+				v = p.p1 + (p.p2 - p.p1) * (float(word(i) >> 8) * (1.0 / 16777216.0));
+			} else if (p.kind == 42) {
+				float u1 = (float(word(2u * i) >> 8) + 1.0) * (1.0 / 16777216.0);
+				float u2 = float(word(2u * i + 1u) >> 8) * (1.0 / 16777216.0);
+				v = p.p1 + p.p2 * sqrt(-2.0 * log(u1)) * cos(6.283185307179586 * u2);
+			} else {
+				v = (p.all_keep != 0u || word(i) < p.thr) ? p.keep_value : 0.0;
+			}
+			p.o.v[i] = v;
+		}
+	]"
 
 	Binary_same: STRING_8 = "[
 		layout(push_constant) uniform P { F a; F b; F o; uint n; int kind; } p;

@@ -342,6 +342,26 @@ feature -- Kernels: losses
 		deferred
 		end
 
+feature -- Kernels: random fill (gap G-6)
+
+	fill_random (a_out: TENSOR_STORAGE; a_kind: INTEGER; p1, p2: REAL_64; a_seed, a_position: NATURAL_64)
+			-- Fill from Philox4x32-10 keyed by `a_seed', stream 0, starting at word `a_position'.
+			-- Words are addressed, so every backend gives element i the same word(s):
+			--   Uniform_fill_kind: p1 + (p2 - p1) * u, u = (word (p + i) >> 8) / 2^24, in [p1, p2]
+			--   Normal_fill_kind: mean p1, std p2, Box-Muller from words p + 2i, p + 2i + 1:
+			--     u1 = ((w1 >> 8) + 1) / 2^24 in (0, 1], u2 = (w2 >> 8) / 2^24
+			--   Keep_mask_fill_kind: 1/p1 when word (p + i) < ceiling (p1 * 2^32), else 0
+			--     (integer-exact: masks are bit-identical on every backend)
+		require
+			owned: owns (a_out)
+			live: not a_out.is_released
+			kind_known: is_fill_kind (a_kind)
+			uniform_ordered: a_kind = Uniform_fill_kind implies p1 <= p2
+			normal_spread: a_kind = Normal_fill_kind implies p2 >= 0.0
+			keep_probability: a_kind = Keep_mask_fill_kind implies (0.0 < p1 and p1 <= 1.0)
+		deferred
+		end
+
 feature -- Kernels: optimizers (in place on the parameter)
 
 	sgd_update (a_param, a_grad: TENSOR_STORAGE; a_rate: REAL_64)
