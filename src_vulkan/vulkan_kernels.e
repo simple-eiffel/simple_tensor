@@ -181,7 +181,20 @@ feature {NONE} -- Kernel bodies
 			Result.put (Causal_softmax, "causal_softmax")
 			Result.put (Layer_norm, "layer_norm")
 			Result.put (Add_bias, "add_bias")
+			Result.put (Scatter_add_rows_csr, "scatter_add_rows_csr")
 		end
+
+	Scatter_add_rows_csr: STRING_8 = "[
+		layout(push_constant) uniform P { F g; I offsets; I positions; F o; uint dim; uint rows; } p;
+		void main() {
+			uint f = gid(); if (f >= p.rows * p.dim) return;
+			uint r = f / p.dim; uint d = f % p.dim;
+			float acc = p.o.v[f];
+			int stop = p.offsets.v[r + 1u];
+			for (int j = p.offsets.v[r]; j < stop; j++) acc += p.g.v[uint(p.positions.v[j]) * p.dim + d];
+			p.o.v[f] = acc;
+		}
+	]"
 
 	Add_bias: STRING_8 = "[
 		layout(push_constant) uniform P { F o; F bias; uint n; uint cols; } p;

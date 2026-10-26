@@ -408,16 +408,52 @@ feature -- Kernels: indexing
 		end
 
 	scatter_add_rows (a_grad: TENSOR_STORAGE; a_indices: INDEX_TENSOR; a_out: TENSOR_STORAGE; a_rows, a_dim: INTEGER)
+			-- The indices are host data, so the host groups positions by target row (CSR:
+			-- offsets per row, positions in ascending order) in one pass; each GPU thread then
+			-- adds only its own row's positions, in the order the plain loop would.
 		local
 			p: VULKAN_PUSH_BLOCK
-			l_ix: VULKAN_DEVICE_BUFFER
+			l_offsets_buffer, l_positions_buffer: VULKAN_DEVICE_BUFFER
+			l_offsets, l_positions: MANAGED_POINTER
+			l_rows, i, r, l_at: INTEGER
+			l_next: SPECIAL [INTEGER]
 		do
-			l_ix := index_buffer (a_indices)
+			l_rows := a_out.count // a_dim
+			create l_offsets.make ((l_rows + 1) * 4)
+			create l_positions.make (a_indices.count.max (1) * 4)
+			from i := 0 until i = a_indices.count loop
+				r := a_indices.item (i)
+				l_offsets.put_integer_32 (l_offsets.read_integer_32 ((r + 1) * 4) + 1, (r + 1) * 4)
+				i := i + 1
+			end
+			from r := 1 until r > l_rows loop
+				l_offsets.put_integer_32 (l_offsets.read_integer_32 (r * 4) + l_offsets.read_integer_32 ((r - 1) * 4), r * 4)
+				r := r + 1
+			end
+			create l_next.make_filled (0, l_rows)
+			from r := 0 until r = l_rows loop
+				l_next [r] := l_offsets.read_integer_32 (r * 4)
+				r := r + 1
+			end
+			from i := 0 until i = a_indices.count loop
+				r := a_indices.item (i)
+				l_at := l_next [r]
+				l_positions.put_integer_32 (i, l_at * 4)
+				l_next [r] := l_at + 1
+				i := i + 1
+			end
+			create l_offsets_buffer.make (context, l_offsets.count.to_integer_64)
+			create l_positions_buffer.make (context, l_positions.count.to_integer_64)
+			last_record_ok := l_offsets_buffer.write (l_offsets.item, l_offsets.count.to_integer_64, 0)
+				and l_positions_buffer.write (l_positions.item, l_positions.count.to_integer_64, 0)
+			check written: last_record_ok end
 			create p.make
-			p.address (addr (a_grad)); p.address (l_ix.address); p.address (addr (a_out))
-			p.natural (a_indices.count); p.natural (a_dim); p.natural (a_out.count // a_dim)
-			run ("scatter_add_rows", p, a_out.count)
-			l_ix.release_deferred
+			p.address (addr (a_grad)); p.address (l_offsets_buffer.address); p.address (l_positions_buffer.address)
+			p.address (addr (a_out))
+			p.natural (a_dim); p.natural (l_rows)
+			run ("scatter_add_rows_csr", p, a_out.count)
+			l_offsets_buffer.release_deferred
+			l_positions_buffer.release_deferred
 			gpu (a_out).invalidate
 		end
 
