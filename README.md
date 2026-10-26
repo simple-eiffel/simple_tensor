@@ -16,6 +16,15 @@ set SIMPLE_EIFFEL=D:\prod
 
 Needs simple_math 0.2.0+ (`tanh`, `erf`), simple_randomizer 1.2.0+ (the Philox4x32-10 generator) and simple_file 1.2.0+ (bulk binary I/O), plus simple_mml and simple_json.
 
+> Until they are merged, these versions are on feature branches. Check them out before building:
+>
+> - simple_math `feature/tanh-erf-sigmoid`
+> - simple_randomizer `feature/philox-counter-rng`
+> - simple_file `feature/bulk-binary-io`
+> - for the GPU ECF:
+>   - simple_vulkan `feature/async-submit`
+>   - simple_shaderc `feature/target-env`
+
 ## Quick start
 
 A 2-8-1 network learns XOR. This is test `test_readme_quick_start`, verbatim; it reaches a loss under 0.01.
@@ -84,7 +93,7 @@ To use the oracle: `create f.make_with_backend (create {REFERENCE_BACKEND})`.
 
 ### The GPU backend (simple_tensor_vulkan.ecf)
 
-VULKAN_BACKEND runs every operation as our own GLSL compute shader on any Vulkan GPU, through simple_vulkan 0.3.0. It lives in a separate ECF, so CPU-only users never need the Vulkan SDK.
+VULKAN_BACKEND runs every operation as our own GLSL compute shader on any Vulkan GPU, through simple_vulkan 0.7.0 (shaders compiled at run time by simple_shaderc 0.2.0). It lives in a separate ECF, so CPU-only users never need the Vulkan SDK.
 
 ```xml
 <library name="simple_tensor_vulkan" location="$SIMPLE_EIFFEL/simple_tensor/simple_tensor_vulkan.ecf"/>
