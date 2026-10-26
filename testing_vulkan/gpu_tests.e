@@ -94,6 +94,52 @@ feature -- GPU tests
 			assert ("GPU cold kernels match the oracle within 1e-4 (" + t.last_report + ")", t.within (1.0e-4))
 		end
 
+	test_gpu_mixed_precision_matmul
+			-- With mixed precision on, products run on the tensor cores (bf16 operands, f32
+			-- sums): the ragged multi-tile, 128-wide and split-K product sets, every transpose
+			-- flag and batching, each within 1% of the oracle by norm (bf16 keeps 8 bits).
+			-- Skipped without bf16 cooperative matrices. Mixed precision is off again after.
+		local
+			l_err, l_worst: REAL_64
+		do
+			if attached {VULKAN_BACKEND} gpu.backend as v and then v.can_mix_precision then
+				v.set_mixed_precision (True)
+				v.reset_profile
+				v.set_profiling (True)
+				l_worst := norm_relative_error (twin_matmul_large (gpu), twin_matmul_large (oracle))
+				l_err := norm_relative_error (twin_matmul_wide (gpu), twin_matmul_wide (oracle))
+				l_worst := l_worst.max (l_err)
+				l_err := norm_relative_error (twin_matmul_split_k (gpu), twin_matmul_split_k (oracle))
+				l_worst := l_worst.max (l_err)
+				v.set_profiling (False)
+				v.set_mixed_precision (False)
+				print ("      GPU mixed precision (tensor cores): worst norm-relative error " + l_worst.out
+					+ ", tensor-core kernel time " + v.profiled_ms ("matmul_coop").out + " ms%N")
+				assert ("ran on the tensor cores", v.profiled_ms ("matmul_coop") > 0.0)
+				assert ("within 1%% of the oracle by norm", l_worst <= 0.01)
+				assert ("bf16 really rounds (not f32)", l_worst > 1.0e-5)
+			else
+				print ("      GPU mixed precision: SKIP (no bf16 cooperative matrices)%N")
+			end
+		end
+
+	norm_relative_error (a_candidate, a_oracle: TENSOR): REAL_64
+			-- ||candidate - oracle|| / ||oracle||.
+		local
+			c, o: ARRAY [REAL_32]
+			i: INTEGER
+			l_diff, l_norm: REAL_64
+		do
+			c := a_candidate.to_array
+			o := a_oracle.to_array
+			from i := o.lower until i > o.upper loop
+				l_diff := l_diff + (c [i] - o [i]).to_double ^ 2
+				l_norm := l_norm + o [i].to_double ^ 2
+				i := i + 1
+			end
+			Result := (l_diff / l_norm.max (1.0e-30)) ^ 0.5
+		end
+
 	test_gpu_keep_mask_bit_identical
 			-- A 100,000-element dropout mask drawn on the GPU equals the oracle's element for
 			-- element (the keep test is integer-exact), after 1,000 words were already drawn.

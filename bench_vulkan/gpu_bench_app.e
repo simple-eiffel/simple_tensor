@@ -53,23 +53,35 @@ feature {NONE} -- Initialization
 				print (v.profile_report)
 					-- Kernel throughput by shape: the RixGPT trainer's products for one
 					-- micro-batch of 32 x 256 tokens (C 384, 6 heads of 64, B*H = 192).
-				print ("RixGPT matmul shapes, GPU kernel time (batch, M x K x N, flags):%N")
-				shape_profile (gpu, v, 1, 8192, 384, 1152, False, True)
-				shape_profile (gpu, v, 1, 8192, 384, 1536, False, True)
-				shape_profile (gpu, v, 1, 8192, 1536, 384, False, True)
-				shape_profile (gpu, v, 1, 8192, 384, 316, False, True)
-				shape_profile (gpu, v, 1, 8192, 1152, 384, False, False)
-				shape_profile (gpu, v, 1, 1152, 8192, 384, True, False)
-				shape_profile (gpu, v, 1, 1536, 8192, 384, True, False)
-				shape_profile (gpu, v, 1, 384, 8192, 1536, True, False)
-				shape_profile (gpu, v, 1, 316, 8192, 384, True, False)
-				shape_profile (gpu, v, 192, 256, 64, 256, False, True)
-				shape_profile (gpu, v, 192, 256, 256, 64, False, False)
-				shape_profile (gpu, v, 192, 256, 256, 64, True, False)
-				shape_profile (gpu, v, 192, 256, 64, 256, False, False)
+				print ("RixGPT matmul shapes, f32, GPU kernel time (batch, M x K x N, flags):%N")
+				rixgpt_shapes (gpu, v)
+				if v.can_mix_precision then
+					v.set_mixed_precision (True)
+					print ("RixGPT matmul shapes, mixed precision (bf16 tensor cores):%N")
+					rixgpt_shapes (gpu, v)
+					v.set_mixed_precision (False)
+				end
 				v.set_profiling (False)
 				print ("GPU buffer pool: " + v.context.pool_hits.out + " allocations served from the pool, " + (v.context.pooled_bytes // (1024 * 1024)).out + " MB pooled%N")
 			end
+		end
+
+	rixgpt_shapes (gpu: SIMPLE_TENSOR; v: VULKAN_BACKEND)
+			-- The RixGPT trainer's products for one micro-batch of 32 x 256 tokens.
+		do
+			shape_profile (gpu, v, 1, 8192, 384, 1152, False, True)
+			shape_profile (gpu, v, 1, 8192, 384, 1536, False, True)
+			shape_profile (gpu, v, 1, 8192, 1536, 384, False, True)
+			shape_profile (gpu, v, 1, 8192, 384, 316, False, True)
+			shape_profile (gpu, v, 1, 8192, 1152, 384, False, False)
+			shape_profile (gpu, v, 1, 1152, 8192, 384, True, False)
+			shape_profile (gpu, v, 1, 1536, 8192, 384, True, False)
+			shape_profile (gpu, v, 1, 384, 8192, 1536, True, False)
+			shape_profile (gpu, v, 1, 316, 8192, 384, True, False)
+			shape_profile (gpu, v, 192, 256, 64, 256, False, True)
+			shape_profile (gpu, v, 192, 256, 256, 64, False, False)
+			shape_profile (gpu, v, 192, 256, 256, 64, True, False)
+			shape_profile (gpu, v, 192, 256, 64, 256, False, False)
 		end
 
 feature {NONE} -- Steps
@@ -157,7 +169,7 @@ feature {NONE} -- Steps
 				i := i + 1
 			end
 			l_any := c.item (0)
-			l_ms := (v.profiled_ms ("matmul") + v.profiled_ms ("matmul_128")) / reps
+			l_ms := (v.profiled_ms ("matmul") + v.profiled_ms ("matmul_128") + v.profiled_ms ("matmul_coop")) / reps
 			create fd.make (8, 3)
 			print ("  " + nb.out + " x " + m.out + "x" + k.out + "x" + n.out + " ta=" + ta.out + " tb=" + tb.out
 				+ ": " + fd.formatted (l_ms) + " ms, " + fd.formatted (2.0 * nb * m * k * n / (l_ms / 1000.0) / 1.0e12)

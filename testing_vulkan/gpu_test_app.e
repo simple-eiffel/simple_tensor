@@ -19,6 +19,7 @@ feature {NONE} -- Initialization
 			run (agent t.test_gpu_storage_basics, "GPU storage basics")
 			run (agent t.test_gpu_twin_parity, "GPU twin parity: every hot kernel")
 			run (agent t.test_gpu_cold_parity, "GPU twin parity: every cold kernel")
+			run (agent t.test_gpu_mixed_precision_matmul, "GPU mixed precision (tensor cores) within 1%% of the oracle")
 			run (agent t.test_gpu_keep_mask_bit_identical, "GPU dropout mask bit-identical to the oracle")
 			run (agent t.test_gpu_training_tracks_oracle, "GPU training tracks the oracle")
 			run (agent t.test_gpu_fallback_ledger, "GPU host-fallback ledger")

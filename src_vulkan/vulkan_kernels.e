@@ -19,7 +19,9 @@ feature -- Source
 		require
 			known: has (a_name)
 		do
-			if a_name.same_string ("matmul_128") then
+			if a_name.same_string ("matmul_coop") then
+				Result := Matmul_coop
+			elseif a_name.same_string ("matmul_128") then
 				Result := Matmul_128
 			elseif a_name.same_string ("matmul_16") then
 				Result := Matmul_16
@@ -34,7 +36,14 @@ feature -- Source
 
 	has (a_name: STRING_8): BOOLEAN
 		do
-			Result := a_name.same_string ("matmul") or a_name.same_string ("matmul_16") or a_name.same_string ("matmul_128") or bodies.has (a_name)
+			Result := a_name.same_string ("matmul") or a_name.same_string ("matmul_16") or a_name.same_string ("matmul_128")
+				or a_name.same_string ("matmul_coop") or bodies.has (a_name)
+		end
+
+	needs_vulkan_1_3 (a_name: STRING_8): BOOLEAN
+			-- Must kernel `a_name' be compiled for Vulkan 1.3 / SPIR-V 1.6 (cooperative matrices)?
+		do
+			Result := a_name.same_string ("matmul_coop")
 		end
 
 feature {NONE} -- Shared GLSL
@@ -177,6 +186,116 @@ feature {NONE} -- Shared GLSL
 					for (uint j = 0u; j < 8u; j++) {
 						uint cc = col0 + tx + 16u * j;
 						if (cc < p.N) p.c.v[bc + r * p.N + cc] = acc[i][j];
+					}
+				}
+			}
+		}
+	]"
+
+	Matmul_coop: STRING_8 = "[
+		#version 460
+		#extension GL_EXT_buffer_reference : require
+		#extension GL_KHR_cooperative_matrix : require
+		#extension GL_KHR_memory_scope_semantics : require
+		#extension GL_KHR_shader_subgroup_basic : require
+		#extension GL_EXT_bfloat16 : require
+		layout(local_size_x = 256) in;
+		layout(buffer_reference, std430, buffer_reference_align = 4) buffer F { float v[]; };
+		layout(push_constant) uniform P { F a; F b; F c; uint M; uint K; uint N; uint ta; uint tb; uint sh; uint kc; } p;
+		// Tensor cores: bf16 inputs, f32 accumulation (PyTorch's bf16 autocast). 128 x 128 output
+		// tile per group, K advancing 32 at a time; 8 warps of 32 threads (NVIDIA) in a 2 x 4
+		// grid, each a 64 x 32 block held as 4 x 2 cooperative 16 x 16 accumulators.
+		// Operands are read as f32 and rounded to bf16 into shared tiles that keep their
+		// global layout (a transposed operand stays column-major and is loaded as such), so
+		// coalesced reads become conflict-free shared writes; rows are padded to 40 or 136
+		// elements (16-byte aligned). The next K tile is fetched into registers while the
+		// tensor cores work on the current one. Whole in-bounds 16 x 16 results go straight
+		// to memory; ragged ones through a per-warp staging tile. Split-K and batching as
+		// in the f32 kernels.
+		const uint S32 = 40u;
+		const uint S128 = 136u;
+		shared bfloat16_t As[5120];
+		shared bfloat16_t Bs[5120];
+		shared float St[8 * 256];
+		void main() {
+			uint z = gl_WorkGroupID.z;
+			uint ks = (p.kc != 0u) ? z : 0u; uint zb = (p.kc != 0u) ? 0u : z;
+			uint k0 = ks * p.kc; uint k1 = (p.kc != 0u) ? min(p.K, k0 + p.kc) : p.K;
+			uint ba = zb * p.M * p.K;
+			uint bb = (p.sh != 0u) ? 0u : zb * p.K * p.N;
+			uint bc = z * p.M * p.N;
+			uint tid = gl_LocalInvocationID.x;
+			uint w = tid >> 5u;
+			uint lane = tid & 31u;
+			uint wm = (w >> 2u) * 64u;
+			uint wn = (w & 3u) * 32u;
+			uint row0 = gl_WorkGroupID.y * 128u;
+			uint col0 = gl_WorkGroupID.x * 128u;
+			coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator> acc[4][2];
+			for (uint i = 0u; i < 4u; i++) for (uint j = 0u; j < 2u; j++) acc[i][j] = coopmat<float, gl_ScopeSubgroup, 16, 16, gl_MatrixUseAccumulator>(0.0);
+			float ra[16];
+			float rb[16];
+			for (uint q = 0u; q < 16u; q++) {
+				uint e = tid + 256u * q;
+				uint gm; uint gk; uint gn; uint gkb;
+				if (p.ta != 0u) { gk = k0 + (e >> 7u); gm = row0 + (e & 127u); } else { gm = row0 + (e >> 5u); gk = k0 + (e & 31u); }
+				ra[q] = (gm < p.M && gk < k1) ? ((p.ta != 0u) ? p.a.v[ba + gk * p.M + gm] : p.a.v[ba + gm * p.K + gk]) : 0.0;
+				if (p.tb != 0u) { gn = col0 + (e >> 5u); gkb = k0 + (e & 31u); } else { gkb = k0 + (e >> 7u); gn = col0 + (e & 127u); }
+				rb[q] = (gn < p.N && gkb < k1) ? ((p.tb != 0u) ? p.b.v[bb + gn * p.K + gkb] : p.b.v[bb + gkb * p.N + gn]) : 0.0;
+			}
+			for (uint t = k0; t < k1; t += 32u) {
+				for (uint q = 0u; q < 16u; q++) {
+					uint e = tid + 256u * q;
+					// A: row-major [m][k] (stride 40), or as read when transposed: [k][m] (stride 136).
+					if (p.ta != 0u) As[(e >> 7u) * S128 + (e & 127u)] = bfloat16_t(ra[q]); else As[(e >> 5u) * S32 + (e & 31u)] = bfloat16_t(ra[q]);
+					// B: row-major [k][n] (stride 136), or as read when transposed: [n][k] (stride 40).
+					if (p.tb != 0u) Bs[(e >> 5u) * S32 + (e & 31u)] = bfloat16_t(rb[q]); else Bs[(e >> 7u) * S128 + (e & 127u)] = bfloat16_t(rb[q]);
+				}
+				barrier();
+				uint tn = t + 32u;
+				if (tn < k1) {
+					for (uint q = 0u; q < 16u; q++) {
+						uint e = tid + 256u * q;
+						uint gm; uint gk; uint gn; uint gkb;
+						if (p.ta != 0u) { gk = tn + (e >> 7u); gm = row0 + (e & 127u); } else { gm = row0 + (e >> 5u); gk = tn + (e & 31u); }
+						ra[q] = (gm < p.M && gk < k1) ? ((p.ta != 0u) ? p.a.v[ba + gk * p.M + gm] : p.a.v[ba + gm * p.K + gk]) : 0.0;
+						if (p.tb != 0u) { gn = col0 + (e >> 5u); gkb = tn + (e & 31u); } else { gkb = tn + (e >> 7u); gn = col0 + (e & 127u); }
+						rb[q] = (gn < p.N && gkb < k1) ? ((p.tb != 0u) ? p.b.v[bb + gn * p.K + gkb] : p.b.v[bb + gkb * p.N + gn]) : 0.0;
+					}
+				}
+				for (uint k = 0u; k < 32u; k += 16u) {
+					coopmat<bfloat16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseA> fa[4];
+					coopmat<bfloat16_t, gl_ScopeSubgroup, 16, 16, gl_MatrixUseB> fb[2];
+					if (p.ta != 0u) {
+						for (uint i = 0u; i < 4u; i++) coopMatLoad(fa[i], As, k * S128 + wm + 16u * i, S128, gl_CooperativeMatrixLayoutColumnMajor);
+					} else {
+						for (uint i = 0u; i < 4u; i++) coopMatLoad(fa[i], As, (wm + 16u * i) * S32 + k, S32, gl_CooperativeMatrixLayoutRowMajor);
+					}
+					if (p.tb != 0u) {
+						for (uint j = 0u; j < 2u; j++) coopMatLoad(fb[j], Bs, (wn + 16u * j) * S32 + k, S32, gl_CooperativeMatrixLayoutColumnMajor);
+					} else {
+						for (uint j = 0u; j < 2u; j++) coopMatLoad(fb[j], Bs, k * S128 + wn + 16u * j, S128, gl_CooperativeMatrixLayoutRowMajor);
+					}
+					for (uint i = 0u; i < 4u; i++) for (uint j = 0u; j < 2u; j++) acc[i][j] = coopMatMulAdd(fa[i], fb[j], acc[i][j]);
+				}
+				barrier();
+			}
+			for (uint i = 0u; i < 4u; i++) {
+				for (uint j = 0u; j < 2u; j++) {
+					uint r0 = row0 + wm + 16u * i;
+					uint c0 = col0 + wn + 16u * j;
+					if (r0 + 16u <= p.M && c0 + 16u <= p.N && (p.N & 3u) == 0u) {
+						coopMatStore(acc[i][j], p.c.v, bc + r0 * p.N + c0, p.N, gl_CooperativeMatrixLayoutRowMajor);
+					} else {
+						coopMatStore(acc[i][j], St, w * 256u, 16u, gl_CooperativeMatrixLayoutRowMajor);
+						subgroupMemoryBarrierShared();
+						subgroupBarrier();
+						for (uint e = lane; e < 256u; e += 32u) {
+							uint r = r0 + (e >> 4u);
+							uint cc = c0 + (e & 15u);
+							if (r < p.M && cc < p.N) p.c.v[bc + r * p.N + cc] = St[w * 256u + e];
+						}
+						subgroupBarrier();
 					}
 				}
 			}

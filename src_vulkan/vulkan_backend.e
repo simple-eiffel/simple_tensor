@@ -285,18 +285,25 @@ feature -- Kernels: reductions
 feature -- Kernels: linear algebra
 
 	matmul (a, b, a_out: TENSOR_STORAGE; a_batch, a_m, a_k, a_n: INTEGER; a_ta, a_tb, a_b_shared: BOOLEAN)
-			-- Three routes: split-K for one long-K product (a weight gradient, K = tokens,
-			-- whose few output tiles cannot fill the GPU), 128 x 128 tiles for large
-			-- products, 64 x 64 tiles otherwise.
+			-- In f32, three routes: split-K for one long-K product (a weight gradient,
+			-- K = tokens, whose few output tiles cannot fill the GPU), 128 x 128 tiles for
+			-- large products, 64 x 64 tiles otherwise. With `mixed_precision', every product
+			-- runs on the tensor cores (bf16 inputs, f32 sums), split-K included.
 		local
 			p, q: VULKAN_PUSH_BLOCK
-			l_groups, l_slices, l_kc: INTEGER
+			l_groups, l_slices, l_kc, l_tile, l_target: INTEGER
+			l_kernel: STRING_8
 			l_part: VULKAN_DEVICE_BUFFER
 		do
-			l_groups := ((a_n + 63) // 64) * ((a_m + 63) // 64)
-			if split_k and a_batch = 1 and a_k >= 512 and a_k >= 4 * a_m.max (a_n) and l_groups < Split_target_groups then
-				l_slices := (Split_target_groups // l_groups).max (2).min (a_k // 256)
-				l_kc := ((a_k + l_slices - 1) // l_slices + 15) // 16 * 16
+			if mixed_precision then
+				l_kernel := "matmul_coop"; l_tile := 128; l_target := Split_target_groups // 4
+			else
+				l_kernel := "matmul"; l_tile := 64; l_target := Split_target_groups
+			end
+			l_groups := ((a_n + l_tile - 1) // l_tile) * ((a_m + l_tile - 1) // l_tile)
+			if split_k and a_batch = 1 and a_k >= 512 and a_k >= 4 * a_m.max (a_n) and l_groups < l_target then
+				l_slices := (l_target // l_groups).max (2).min (a_k // 256)
+				l_kc := ((a_k + l_slices - 1) // l_slices + 31) // 32 * 32
 				l_slices := (a_k + l_kc - 1) // l_kc
 			end
 			create p.make
@@ -311,7 +318,7 @@ feature -- Kernels: linear algebra
 			p.natural (a_ta.to_integer); p.natural (a_tb.to_integer); p.natural (a_b_shared.to_integer)
 			if l_slices >= 2 and then attached l_part as l_p then
 				p.natural (l_kc)
-				run_groups ("matmul", p, (a_n + 63) // 64, (a_m + 63) // 64, l_slices)
+				run_groups (l_kernel, p, (a_n + l_tile - 1) // l_tile, (a_m + l_tile - 1) // l_tile, l_slices)
 				create q.make
 				q.address (l_p.address); q.address (addr (a_out)); q.natural (a_m * a_n); q.natural (l_slices)
 				run ("sum_slices", q, a_m * a_n)
@@ -320,13 +327,33 @@ feature -- Kernels: linear algebra
 				l_p.recycle
 			else
 				p.natural (0)
-				if wide_tiles and a_m >= 128 and a_n >= 128 then
-					run_groups ("matmul_128", p, (a_n + 127) // 128, (a_m + 127) // 128, a_batch)
-				else
-					run_groups ("matmul", p, (a_n + 63) // 64, (a_m + 63) // 64, a_batch)
+				if not mixed_precision and wide_tiles and a_m >= 128 and a_n >= 128 then
+					l_kernel := "matmul_128"; l_tile := 128
 				end
+				run_groups (l_kernel, p, (a_n + l_tile - 1) // l_tile, (a_m + l_tile - 1) // l_tile, a_batch)
 			end
 			gpu (a_out).invalidate
+		end
+
+	mixed_precision: BOOLEAN
+			-- Do products run on the tensor cores, with operands rounded to bf16 and sums in f32
+			-- (PyTorch's bf16 autocast)? Off by default: f32 throughout, oracle parity at 1e-4.
+
+	can_mix_precision: BOOLEAN
+			-- Can `mixed_precision' be switched on: bf16 cooperative matrices enabled, on an
+			-- NVIDIA GPU (the kernel assumes warps of 32)?
+		do
+			Result := context.has_cooperative_matrix_bf16 and context.is_nvidia
+		end
+
+	set_mixed_precision (a_on: BOOLEAN)
+			-- Run products on the tensor cores (or not).
+		require
+			supported: a_on implies can_mix_precision
+		do
+			mixed_precision := a_on
+		ensure
+			set: mixed_precision = a_on
 		end
 
 	Split_target_groups: INTEGER = 512
@@ -739,7 +766,7 @@ feature {NONE} -- Dispatch
 		do
 			if attached programs.item (a_name) as l_p then
 				Result := l_p
-			elseif attached shaderc.compile_compute (kernels.source (a_name)) as l_code then
+			elseif attached compiled (a_name) as l_code then
 				create s.make_from_memory (context, l_code.item, l_code.count.to_integer_64)
 				create Result.make (context, s)
 				s.dispose
@@ -752,6 +779,16 @@ feature {NONE} -- Dispatch
 			end
 		ensure
 			cached: programs.has (a_name)
+		end
+
+	compiled (a_name: STRING_8): detachable MANAGED_POINTER
+			-- SPIR-V of kernel `a_name' (Void on a compile error, in `shaderc.last_error'),
+			-- for Vulkan 1.3 when the kernel needs it, else shaderc's default target.
+		require
+			known: kernels.has (a_name)
+		do
+			shaderc.set_target_vulkan_1_3 (kernels.needs_vulkan_1_3 (a_name))
+			Result := shaderc.compile_compute (kernels.source (a_name))
 		end
 
 	run (a_name: STRING_8; p: VULKAN_PUSH_BLOCK; a_threads: INTEGER)
@@ -1021,5 +1058,6 @@ feature {NONE} -- Host fallback (rank above Max_rank)
 
 invariant
 	addressable: context.is_valid and context.has_device_address
+	mixed_only_when_supported: mixed_precision implies can_mix_precision
 
 end

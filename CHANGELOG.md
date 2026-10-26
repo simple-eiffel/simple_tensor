@@ -16,6 +16,13 @@
   - Split-K for one long-K product (the weight gradients, K = tokens): K slices into partials, then `sum_slices`. Those products went from 0.8–2.5 to 6.4–8.9 TFLOP/s.
   - `set_wide_tiles` and `set_split_k` switch each route off for A/B runs; `profiled_ms` gives one kernel's GPU time.
   - New twins: 128-wide tiles and split-K with ragged slices, every transpose flag.
+- **Mixed precision on the tensor cores (opt-in):** `VULKAN_BACKEND.set_mixed_precision`, guarded by `can_mix_precision` (bf16 cooperative matrices from simple_vulkan 0.6.0, on NVIDIA).
+  - Every product runs `matmul_coop`: bf16 operands and f32 sums, as in PyTorch's bf16 autocast. Split-K and batching work the same way.
+  - The shared tiles keep each operand's global layout, the next K tile is prefetched into registers, and whole tiles are stored directly.
+  - The RixGPT products reach 9–12 TFLOP/s, against 6–9 in f32. A training step takes 288 ms, against 334 in f32.
+  - It is off by default, so f32 and the 1e-4 oracle parity are unchanged.
+  - New GPU test: every product set (ragged, all flags, batched, split-K) is within 1% of the oracle by norm. The actual error is 0.21%; the test also checks that the tensor-core kernel ran. 7/7.
+  - Kernels that need it are compiled for Vulkan 1.3 (simple_shaderc 0.2.0).
 - **Fixes:**
   - VULKAN_STORAGE.dispose called a routine on another object, which may already be reclaimed; it now uses its own raw handles.
   - A failed GPU allocation used to go unnoticed; it now retries after a collection, then raises a clear error.
