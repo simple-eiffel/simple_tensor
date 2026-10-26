@@ -31,11 +31,28 @@ feature {NONE} -- Initialization
 			positive: a_count >= 1
 			not_too_large: a_count <= {TENSOR_SHAPE}.Max_elements
 			addressable: a_context.is_valid and then a_context.has_device_address
+		local
+			l_failure: DEVELOPER_EXCEPTION
 		do
 			element_count := a_count
 			context := a_context
 			storage_budget.note_allocation (byte_count)
 			create buffer.make (a_context, byte_count)
+			if not buffer.is_valid then
+					-- Out of device memory: let the collector recycle dead storages, return the
+					-- pool's buffers to the driver, run pending frees, and try once more.
+				(create {MEMORY}).full_collect
+				a_context.trim_pool
+				a_context.flush
+				create buffer.make (a_context, byte_count)
+				if not buffer.is_valid then
+					l_failure := create {DEVELOPER_EXCEPTION}
+					l_failure.set_description ("GPU out of memory: cannot allocate " + byte_count.out + " bytes for a tensor")
+					l_failure.raise
+				end
+			end
+			raw_context := a_context.handle
+			raw_buffer := buffer.handle
 			last_transfer_ok := buffer.is_valid and then buffer.record_fill (0, byte_count, 0)
 			check
 				zeroed: last_transfer_ok
@@ -108,6 +125,7 @@ feature {TENSOR_BACKEND, TENSOR, TENSOR_OP, TENSOR_OPTIMIZER, SAFETENSORS_FILE, 
 		do
 			if not is_released then
 				buffer.recycle
+				raw_buffer := default_pointer
 				is_released := True
 				is_mirror_valid := False
 				mirror := Void
@@ -183,12 +201,25 @@ feature {NONE} -- Implementation
 		end
 
 	dispose
-			-- Collector: hand the GPU memory back without waiting on the GPU.
+			-- Collector: hand the GPU memory back without waiting on the GPU. Touches no
+			-- other Eiffel object (the collector may already have reclaimed `buffer' and the
+			-- context object in this same cycle): only this object's own raw C handles.
 		do
-			if not is_released then
-				buffer.recycle
+			if not is_released and raw_buffer /= default_pointer then
+				c_recycle (raw_context, raw_buffer)
+				raw_buffer := default_pointer
 				is_released := True
 			end
+		end
+
+	raw_context, raw_buffer: POINTER
+			-- svk_context and svk_buffer of `buffer', kept here for `dispose'.
+
+	c_recycle (a_context, a_buffer: POINTER)
+		external
+			"C inline use <simple_vulkan.h>"
+		alias
+			"svk_recycle_buffer((svk_context)$a_context, (svk_buffer)$a_buffer);"
 		end
 
 invariant
