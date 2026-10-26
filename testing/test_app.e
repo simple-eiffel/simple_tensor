@@ -14,6 +14,7 @@ feature {NONE} -- Initialization
 			-- Run every test.
 		local
 			t: LIB_TESTS
+			n: NN_TESTS
 		do
 			create t
 			print ("simple_tensor tests%N===================%N")
@@ -56,6 +57,14 @@ feature {NONE} -- Initialization
 			run (agent t.test_random_addresses_are_fixed, "random values have fixed stream addresses (G-6)")
 			-- SCOOP consumer (compile-time compatibility of the main types)
 			run (agent (create {TEST_SCOOP_CONSUMER}).test_scoop_compatibility, "SCOOP consumer compiles and creates the main types")
+			create n
+			-- M2 modules
+			run (agent n.test_nn_linear_by_hand, "NN_LINEAR by hand (2D and 3D)")
+			run (agent n.test_nn_names_and_tying, "module names (PyTorch layout) and tied weights")
+			run (agent n.test_nn_layer_norm, "NN_LAYER_NORM values and gradients")
+			run (agent n.test_nn_mlp_and_attention_gradients, "MLP and attention gradient checks")
+			run (agent n.test_nn_attention_matches_naive, "attention equals a naive per-head computation")
+			run (agent n.test_nn_dropout, "NN_DROPOUT eval identity and training statistics")
 			print ("%N===================%NResults: " + passed.out + " passed, " + failed.out + " failed%N")
 		end
 
