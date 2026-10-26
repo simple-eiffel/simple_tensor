@@ -283,7 +283,7 @@ feature -- Kernels: linear algebra
 			p.address (addr (a)); p.address (addr (b)); p.address (addr (a_out))
 			p.natural (a_m); p.natural (a_k); p.natural (a_n)
 			p.natural (a_ta.to_integer); p.natural (a_tb.to_integer); p.natural (a_b_shared.to_integer)
-			run_groups ("matmul", p, (a_n + 15) // 16, (a_m + 15) // 16, a_batch)
+			run_groups ("matmul", p, (a_n + 63) // 64, (a_m + 63) // 64, a_batch)
 			gpu (a_out).invalidate
 		end
 
@@ -458,6 +458,31 @@ feature -- Kernels: losses
 			gpu (a_out).invalidate
 		end
 
+feature -- Kernels: fused
+
+	causal_softmax (a, a_out: TENSOR_STORAGE; a_rows, a_cols: INTEGER; a_scale: REAL_32)
+		local
+			p: VULKAN_PUSH_BLOCK
+		do
+			create p.make
+			p.address (addr (a)); p.address (addr (a_out))
+			p.natural (a_rows); p.natural (a_cols); p.real (a_scale)
+			run ("causal_softmax", p, a_rows)
+			gpu (a_out).invalidate
+		end
+
+	layer_norm (a, a_weight, a_bias, a_out, a_mean, a_rstd: TENSOR_STORAGE; a_rows, a_cols: INTEGER; a_eps: REAL_64)
+		local
+			p: VULKAN_PUSH_BLOCK
+		do
+			create p.make
+			p.address (addr (a)); p.address (addr (a_weight)); p.address (addr (a_bias))
+			p.address (addr (a_out)); p.address (addr (a_mean)); p.address (addr (a_rstd))
+			p.natural (a_rows); p.natural (a_cols); p.real (a_eps)
+			run ("layer_norm", p, a_rows)
+			gpu (a_out).invalidate; gpu (a_mean).invalidate; gpu (a_rstd).invalidate
+		end
+
 feature -- Kernels: random fill
 
 	fill_random (a_out: TENSOR_STORAGE; a_kind: INTEGER; p1, p2: REAL_64; a_seed, a_position: NATURAL_64)
@@ -508,6 +533,60 @@ feature -- Kernels: optimizers
 			p.real (1.0 - a_beta1 ^ a_step); p.real (1.0 - a_beta2 ^ a_step)
 			run ("adamw", p, a_param.count)
 			gpu (a_param).invalidate; gpu (a_m).invalidate; gpu (a_v).invalidate
+		end
+
+feature -- Profiling
+
+	set_profiling (a_on: BOOLEAN)
+			-- Time every kernel on the GPU (simple_vulkan 0.4.0 timestamps).
+		do
+			context.set_profiling (a_on)
+		end
+
+	reset_profile
+			-- Forget the times gathered so far.
+		do
+			across programs as pr loop
+				pr.reset_profile
+			end
+		end
+
+	profile_report: STRING_8
+			-- Kernels by GPU time, most first: name, calls, ms, share of the total.
+		local
+			l_rows: ARRAYED_LIST [TUPLE [name: STRING_8; ms: REAL_64; calls: INTEGER_64]]
+			l_total: REAL_64
+			i, j: INTEGER
+			l_swap: TUPLE [name: STRING_8; ms: REAL_64; calls: INTEGER_64]
+			fd: FORMAT_DOUBLE
+		do
+			create l_rows.make (programs.count)
+			across programs as pr loop
+				if pr.profiled_calls > 0 then
+					l_rows.extend ([@pr.key, pr.profiled_ms, pr.profiled_calls])
+					l_total := l_total + pr.profiled_ms
+				end
+			end
+			from i := 1 until i > l_rows.count loop
+				from j := i + 1 until j > l_rows.count loop
+					if l_rows [j].ms > l_rows [i].ms then
+						l_swap := l_rows [i]; l_rows [i] := l_rows [j]; l_rows [j] := l_swap
+					end
+					j := j + 1
+				end
+				i := i + 1
+			end
+			create fd.make (10, 1)
+			create Result.make (1024)
+			Result.append ("GPU kernel time (" + fd.formatted (l_total).out + " ms total)%N")
+			across l_rows as r loop
+				Result.append ("  " + r.name)
+				from until Result.count - Result.last_index_of ('%N', Result.count) > 24 loop
+					Result.append_character (' ')
+				end
+				Result.append (fd.formatted (r.ms) + " ms " + fd.formatted (100.0 * r.ms / l_total.max (1.0e-9)) + " %%  "
+					+ r.calls.out + " calls%N")
+			end
 		end
 
 feature -- Status

@@ -65,6 +65,8 @@ feature {NONE} -- Initialization
 			run (agent n.test_nn_mlp_and_attention_gradients, "MLP and attention gradient checks")
 			run (agent n.test_nn_attention_matches_naive, "attention equals a naive per-head computation")
 			run (agent n.test_nn_dropout, "NN_DROPOUT eval identity and training statistics")
+			run (agent n.test_fused_causal_softmax, "fused causal softmax = scale + mask + softmax")
+			run (agent n.test_fused_layer_norm, "fused layer norm = the composition (values, 3 gradients)")
 			print ("%N===================%NResults: " + passed.out + " passed, " + failed.out + " failed%N")
 		end
 

@@ -1,9 +1,8 @@
 note
 	description: "[
 		Layer normalization over the last axis (PyTorch nn.LayerNorm, biased variance):
-		y = (x - mean) / sqrt (var + eps) * weight + bias. A composition of primitives
-		(spec 03 A-S08), so its gradient is the primitives' own; a fused kernel later
-		keeps this composition as its oracle.
+		y = (x - mean) / sqrt (var + eps) * weight + bias. One fused op (TENSOR.layer_norm),
+		whose test holds it to the primitive composition it replaced.
 	]"
 	author: "Larry Rix"
 
@@ -58,13 +57,8 @@ feature -- Status report
 feature -- Basic operations
 
 	forward (x: TENSOR): TENSOR
-		local
-			l_axis: INTEGER
-			xc: TENSOR
 		do
-			l_axis := x.shape.rank
-			xc := x - x.mean (l_axis, True)
-			Result := xc / (xc * xc).mean (l_axis, True).shifted (eps.truncated_to_real).square_root * weight + bias
+			Result := x.layer_norm (weight, bias, eps)
 		ensure then
 			same_shape: Result.shape ~ x.shape
 		end

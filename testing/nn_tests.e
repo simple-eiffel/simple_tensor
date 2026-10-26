@@ -190,6 +190,67 @@ feature -- Tests
 			assert ("attention matches the naive computation", l_worst < 1.0e-5)
 		end
 
+	test_fused_causal_softmax
+			-- causal_softmax (s) = softmax (masked_fill (scaled (s), causal_mask, -1e9)) on the
+			-- oracle, values and gradients; gradient checks through the fused op.
+		local
+			r: TENSOR_RANDOM
+			x, w, a, b: TENSOR
+			va, vb, ga, gb: ARRAY [REAL_32]
+			l_failures: ARRAYED_LIST [STRING]
+			i: INTEGER
+			l_worst: REAL_64
+		do
+			create r.make (7)
+			x := oracle.parameter (uniform (<<2, 3, 4, 4>>, -2.0, 2.0, r))
+			w := uniform (<<2, 3, 4, 4>>, -1.0, 1.0, r)
+			a := x.causal_softmax (0.7)
+			b := x.scaled (0.7).masked_fill (oracle.causal_mask (4), -1.0e9).softmax
+			va := a.to_array; vb := b.to_array
+			ga := (a * w).sum_all.backward.gradient (x).to_array
+			gb := (b * w).sum_all.backward.gradient (x).to_array
+			from i := 1 until i > va.count loop
+				l_worst := l_worst.max ((va [i] - vb [i]).abs).max ((ga [i] - gb [i]).abs)
+				i := i + 1
+			end
+			print ("      fused causal softmax vs composition: worst |difference| " + l_worst.out + "%N")
+			assert ("equals the composition", l_worst < 1.0e-6)
+			create l_failures.make (0)
+			grad_check ("causal_softmax", agent {TENSOR}.causal_softmax (0.7), uniform (<<2, 4, 4>>, -2.0, 2.0, r), r, l_failures)
+			assert ("gradient check", l_failures.is_empty)
+		end
+
+	test_fused_layer_norm
+			-- layer_norm (w, b, eps) = NN_LAYER_NORM's composition, values and all three
+			-- gradients; gradient checks through the fused op for x, weight and bias.
+		local
+			r: TENSOR_RANDOM
+			x, w, b, g, ya, yb: TENSOR
+			s1, s2: GRAD_STORE
+			l_failures: ARRAYED_LIST [STRING]
+			l_worst: REAL_64
+		do
+			create r.make (8)
+			x := oracle.parameter (uniform (<<3, 2, 6>>, -2.0, 2.0, r))
+			w := oracle.parameter (uniform (<<6>>, 0.5, 1.5, r))
+			b := oracle.parameter (uniform (<<6>>, -0.5, 0.5, r))
+			g := uniform (<<3, 2, 6>>, -1.0, 1.0, r)
+			ya := x.layer_norm (w, b, 1.0e-5)
+			yb := composed_layer_norm (x, w, b)
+			s1 := (ya * g).sum_all.backward
+			s2 := (yb * g).sum_all.backward
+			l_worst := max_difference (ya, yb).max (max_difference (s1.gradient (x), s2.gradient (x)))
+				.max (max_difference (s1.gradient (w), s2.gradient (w))).max (max_difference (s1.gradient (b), s2.gradient (b)))
+			print ("      fused layer norm vs composition: worst |difference| " + l_worst.out + "%N")
+			assert ("equals the composition", l_worst < 1.0e-5)
+			create l_failures.make (0)
+			grad_check ("layer_norm/x", agent {TENSOR}.layer_norm (w.detached, b.detached, 1.0e-5), uniform (<<3, 6>>, -2.0, 2.0, r), r, l_failures)
+			grad_check ("layer_norm/weight", agent (x.detached).layer_norm (?, b.detached, 1.0e-5), uniform (<<6>>, 0.5, 1.5, r), r, l_failures)
+			grad_check ("layer_norm/bias", agent (x.detached).layer_norm (w.detached, ?, 1.0e-5), uniform (<<6>>, -0.5, 0.5, r), r, l_failures)
+			across l_failures as f loop print ("      " + f + "%N") end
+			assert ("gradient checks", l_failures.is_empty)
+		end
+
 	test_nn_dropout
 			-- Eval: identity. Training, p = 0.5: values 0 or 2, about half kept, mean near 1.
 		local
@@ -213,6 +274,31 @@ feature -- Tests
 				i := i + 1
 			end
 			assert ("about half kept: " + l_kept.out, 4_850 <= l_kept and l_kept <= 5_150)
+		end
+
+feature {NONE} -- Helpers
+
+	composed_layer_norm (x, w, b: TENSOR): TENSOR
+			-- The primitive composition the fused op replaces.
+		local
+			xc: TENSOR
+			r: INTEGER
+		do
+			r := x.shape.rank
+			xc := x - x.mean (r, True)
+			Result := xc / (xc * xc).mean (r, True).shifted (1.0e-5).square_root * w + b
+		end
+
+	max_difference (a, b: TENSOR): REAL_64
+		local
+			va, vb: ARRAY [REAL_32]
+			i: INTEGER
+		do
+			va := a.to_array; vb := b.to_array
+			from i := 1 until i > va.count loop
+				Result := Result.max ((va [i] - vb [i]).abs)
+				i := i + 1
+			end
 		end
 
 end

@@ -342,6 +342,33 @@ feature -- Kernels: losses
 		deferred
 		end
 
+feature -- Kernels: fused (memory: one output instead of a chain of temporaries)
+
+	causal_softmax (a, a_out: TENSOR_STORAGE; a_rows, a_cols: INTEGER; a_scale: REAL_32)
+			-- Rows of `a_cols' scores, in blocks of `a_cols' rows (square T x T matrices);
+			-- row r is query i = r \\ a_cols. For c <= i: out [r, c] = softmax over c' <= i of
+			-- a_scale * a [r, c']; for c > i (future positions): 0.
+		require
+			owned: owns (a) and owns (a_out)
+			live: not a.is_released and not a_out.is_released
+			sized: a.count = a_rows * a_cols and a_out.count = a.count
+			square_blocks: a_cols >= 1 and a_rows \\ a_cols = 0
+		deferred
+		end
+
+	layer_norm (a, a_weight, a_bias, a_out, a_mean, a_rstd: TENSOR_STORAGE; a_rows, a_cols: INTEGER; a_eps: REAL_64)
+			-- Per row: mean, rstd = 1 / sqrt (biased variance + a_eps);
+			-- out = (a - mean) * rstd * weight + bias. Row statistics go to `a_mean', `a_rstd'.
+		require
+			owned: owns (a) and owns (a_weight) and owns (a_bias) and owns (a_out) and owns (a_mean) and owns (a_rstd)
+			live: not a.is_released and not a_out.is_released and not a_mean.is_released and not a_rstd.is_released
+			sized: a.count = a_rows * a_cols and a_out.count = a.count
+			params_sized: a_weight.count = a_cols and a_bias.count = a_cols
+			stats_sized: a_mean.count = a_rows and a_rstd.count = a_rows
+			eps_positive: a_eps > 0.0
+		deferred
+		end
+
 feature -- Kernels: random fill (gap G-6)
 
 	fill_random (a_out: TENSOR_STORAGE; a_kind: INTEGER; p1, p2: REAL_64; a_seed, a_position: NATURAL_64)

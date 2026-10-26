@@ -56,6 +56,7 @@ feature -- GPU tests
 			t.compare_named ("matmul ta", agent twin_matmul (?, True, False, False))
 			t.compare_named ("matmul tb", agent twin_matmul (?, False, True, False))
 			t.compare_named ("matmul batched shared B", agent twin_matmul (?, False, False, True))
+			t.compare_named ("matmul multi-tile, ragged edges, all flags, batched", agent twin_matmul_large)
 			t.compare_named ("softmax", agent twin_softmax (?, False))
 			t.compare_named ("log_softmax", agent twin_softmax (?, True))
 			t.compare_named ("gather_rows + scatter_add_rows", agent twin_gather_scatter)
@@ -82,6 +83,8 @@ feature -- GPU tests
 			t.compare_named ("sgd_update (2 steps)", agent twin_sgd)
 			t.compare_named ("fill + copy", agent twin_fill_copy)
 			t.compare_named ("fill_random (uniform, normal, keep mask)", agent twin_random)
+			t.compare_named ("causal_softmax (fused) + backward", agent twin_causal_softmax)
+			t.compare_named ("layer_norm (fused) + three gradients", agent twin_layer_norm)
 			print ("      GPU twin parity (cold): worst relative error " + t.worst_relative_error.out + " (" + t.last_report + ")%N")
 			assert ("GPU cold kernels match the oracle within 1e-4 (" + t.last_report + ")", t.within (1.0e-4))
 		end
@@ -231,6 +234,51 @@ feature {NONE} -- Cold-kernel twin cases
 			n := f.zeros (<<4, 4>>); r.fill_normal (n, 0.5, 2.0)
 			m := f.zeros (<<64>>); r.fill_keep_mask (m, 0.8)
 			Result := u.reshaped (<<15>>).concatenated (n.reshaped (<<16>>), 1).concatenated (m, 1)
+		end
+
+	twin_matmul_large (f: SIMPLE_TENSOR): TENSOR
+			-- Sizes that cross 64-wide tiles with ragged edges (70, 130, 90), every transpose
+			-- flag, batched with two operands and with a shared right-hand side.
+		local
+			a, b, at, bt, ab, bb: TENSOR
+		do
+			a := seeded (f, <<70, 130>>, -1.0, 1.0, 110)
+			b := seeded (f, <<130, 90>>, -1.0, 1.0, 111)
+			at := seeded (f, <<130, 70>>, -1.0, 1.0, 112)
+			bt := seeded (f, <<90, 130>>, -1.0, 1.0, 113)
+			ab := seeded (f, <<3, 70, 130>>, -1.0, 1.0, 114)
+			bb := seeded (f, <<3, 130, 90>>, -1.0, 1.0, 115)
+			Result := a.matmul (b).reshaped (<<6300>>)
+				.concatenated (at.matmul_transposed (b, True, False).reshaped (<<6300>>), 1)
+				.concatenated (a.matmul_transposed (bt, False, True).reshaped (<<6300>>), 1)
+				.concatenated (at.matmul_transposed (bt, True, True).reshaped (<<6300>>), 1)
+				.concatenated (ab.matmul (bb).reshaped (<<18900>>), 1)
+				.concatenated (ab.matmul (b).reshaped (<<18900>>), 1)
+		end
+
+	twin_causal_softmax (f: SIMPLE_TENSOR): TENSOR
+		local
+			x, w, a: TENSOR
+		do
+			x := f.parameter (seeded (f, <<2, 3, 5, 5>>, -2.0, 2.0, 96))
+			w := seeded (f, <<2, 3, 5, 5>>, -1.0, 1.0, 97)
+			a := x.causal_softmax (0.6)
+			Result := a.reshaped (<<150>>).concatenated ((a * w).sum_all.backward.gradient (x).reshaped (<<150>>), 1)
+		end
+
+	twin_layer_norm (f: SIMPLE_TENSOR): TENSOR
+		local
+			x, w, b, g, y: TENSOR
+			s: GRAD_STORE
+		do
+			x := f.parameter (seeded (f, <<4, 6>>, -2.0, 2.0, 98))
+			w := f.parameter (seeded (f, <<6>>, 0.5, 1.5, 99))
+			b := f.parameter (seeded (f, <<6>>, -0.5, 0.5, 100))
+			g := seeded (f, <<4, 6>>, -1.0, 1.0, 101)
+			y := x.layer_norm (w, b, 1.0e-5)
+			s := (y * g).sum_all.backward
+			Result := y.reshaped (<<24>>).concatenated (s.gradient (x).reshaped (<<24>>), 1)
+				.concatenated (s.gradient (w), 1).concatenated (s.gradient (b), 1)
 		end
 
 feature {NONE} -- Subject

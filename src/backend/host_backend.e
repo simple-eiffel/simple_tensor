@@ -246,6 +246,71 @@ feature -- Kernels: cold
 			end
 		end
 
+feature -- Kernels: fused
+
+	causal_softmax (a, a_out: TENSOR_STORAGE; a_rows, a_cols: INTEGER; a_scale: REAL_32)
+		local
+			r, c, q, l_base: INTEGER
+			mx, s: REAL_64
+		do
+			from r := 0 until r = a_rows loop
+				q := r \\ a_cols
+				l_base := r * a_cols
+				mx := a_scale * a.item (l_base)
+				from c := 1 until c > q loop
+					mx := mx.max (a_scale * a.item (l_base + c))
+					c := c + 1
+				end
+				s := 0.0
+				from c := 0 until c > q loop
+					s := s + {DOUBLE_MATH}.exp (a_scale * a.item (l_base + c) - mx)
+					c := c + 1
+				end
+				from c := 0 until c = a_cols loop
+					if c <= q then
+						a_out.put (({DOUBLE_MATH}.exp (a_scale * a.item (l_base + c) - mx) / s).truncated_to_real, l_base + c)
+					else
+						a_out.put (0.0, l_base + c)
+					end
+					c := c + 1
+				end
+				r := r + 1
+				gc_point
+			end
+		end
+
+	layer_norm (a, a_weight, a_bias, a_out, a_mean, a_rstd: TENSOR_STORAGE; a_rows, a_cols: INTEGER; a_eps: REAL_64)
+		local
+			r, c, l_base: INTEGER
+			mu, var, rs, d: REAL_64
+		do
+			from r := 0 until r = a_rows loop
+				l_base := r * a_cols
+				mu := 0.0
+				from c := 0 until c = a_cols loop
+					mu := mu + a.item (l_base + c)
+					c := c + 1
+				end
+				mu := mu / a_cols
+				var := 0.0
+				from c := 0 until c = a_cols loop
+					d := a.item (l_base + c) - mu
+					var := var + d * d
+					c := c + 1
+				end
+				var := var / a_cols
+				rs := 1.0 / {DOUBLE_MATH}.sqrt (var + a_eps)
+				a_mean.put (mu.truncated_to_real, r)
+				a_rstd.put (rs.truncated_to_real, r)
+				from c := 0 until c = a_cols loop
+					a_out.put (((a.item (l_base + c) - mu) * rs * a_weight.item (c) + a_bias.item (c)).truncated_to_real, l_base + c)
+					c := c + 1
+				end
+				r := r + 1
+				gc_point
+			end
+		end
+
 feature -- Kernels: random fill
 
 	fill_random (a_out: TENSOR_STORAGE; a_kind: INTEGER; p1, p2: REAL_64; a_seed, a_position: NATURAL_64)

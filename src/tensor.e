@@ -536,6 +536,60 @@ feature -- Linear algebra
 
 feature -- Neural
 
+	causal_softmax (a_scale: REAL_32): TENSOR
+			-- Causal attention weights in one op: the last two axes are T x T scores (query
+			-- rows, key columns); row i gets softmax over keys 0 .. i of a_scale * scores,
+			-- and 0 for keys after i. Same as scaled, masked_fill (causal_mask, -inf), softmax,
+			-- with one stored result instead of three.
+		require
+			matrices: shape.rank >= 2
+			square: shape.dim (shape.rank) = shape.dim (shape.rank - 1)
+			live: not is_released
+		local
+			l_out: TENSOR_STORAGE
+			l_op: detachable TENSOR_OP
+		do
+			l_out := backend.new_storage (shape.count)
+			backend.causal_softmax (storage, l_out, shape.count // shape.last, shape.last, a_scale)
+			if is_tracked then
+				create {TENSOR_OP_CAUSAL_SOFTMAX} l_op.make (Current, l_out, a_scale)
+			end
+			create Result.make_result (shape, l_out, backend, l_op)
+		ensure
+			same_shape: Result.shape ~ shape
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+		end
+
+	layer_norm (a_weight, a_bias: TENSOR; a_eps: REAL_64): TENSOR
+			-- Layer normalization over the last axis in one op (biased variance):
+			-- (x - mean) / sqrt (var + a_eps) * a_weight + a_bias.
+		require
+			params_vectors: a_weight.shape.rank = 1 and a_bias.shape.rank = 1
+			params_fit: a_weight.shape.count = shape.last and a_bias.shape.count = shape.last
+			same_backend: has_same_backend (a_weight) and has_same_backend (a_bias)
+			eps_positive: a_eps > 0.0
+			live: not is_released and not a_weight.is_released and not a_bias.is_released
+		local
+			l_out, l_mean, l_rstd: TENSOR_STORAGE
+			l_op: detachable TENSOR_OP
+			l_rows: INTEGER
+		do
+			l_rows := shape.count // shape.last
+			l_out := backend.new_storage (shape.count)
+			l_mean := backend.new_storage (l_rows)
+			l_rstd := backend.new_storage (l_rows)
+			backend.layer_norm (storage, a_weight.storage, a_bias.storage, l_out, l_mean, l_rstd, l_rows, shape.last, a_eps)
+			if is_tracked or a_weight.is_tracked or a_bias.is_tracked then
+				create {TENSOR_OP_LAYER_NORM} l_op.make (Current, a_weight, a_bias, l_mean, l_rstd)
+			end
+			create Result.make_result (shape, l_out, backend, l_op)
+		ensure
+			same_shape: Result.shape ~ shape
+			tracked_iff_any_input_tracked: Result.is_tracked = (is_tracked or a_weight.is_tracked or a_bias.is_tracked)
+			not_a_parameter: not Result.requires_grad
+		end
+
 	softmax: TENSOR
 			-- Softmax over the last axis.
 		require

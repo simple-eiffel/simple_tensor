@@ -6,10 +6,10 @@ note
 			out_proj (C -> C, with bias)
 		For x (B, T, C) with H heads of D = C / H:
 			qkv = x W_in^T + b_in; q, k, v -> (B*H, T, D)
-			a = softmax (mask (q k^T / sqrt D)), dropout on a (training only)
+			a = causal_softmax (q k^T, scale 1 / sqrt D), dropout on a (training only)
 			y = (a v) -> (B, T, C); out = out_proj (y)
-		The mask hides future positions (strictly upper triangle): masked logits are set to
-		-1e9, which softmax turns into exactly 0 in float.
+		The causal mask is fused into the softmax (TENSOR.causal_softmax): future positions
+		get weight exactly 0, and no mask tensor is built or uploaded.
 	]"
 	author: "Larry Rix"
 
@@ -38,7 +38,6 @@ feature {NONE} -- Initialization
 			w: TENSOR
 		do
 			make_module
-			facade := f
 			heads := a_heads
 			w := f.zeros (<<3 * a_dim, a_dim>>)
 			r.fill_uniform (w, -{DOUBLE_MATH}.sqrt (6.0 / (4 * a_dim)), {DOUBLE_MATH}.sqrt (6.0 / (4 * a_dim)))
@@ -46,7 +45,6 @@ feature {NONE} -- Initialization
 			in_proj_bias := f.parameter (f.zeros (<<3 * a_dim>>))
 			create out_proj.make_normal (f, a_dim, a_dim, True, a_std, r)
 			create attention_dropout.make (a_dropout, r)
-			create masks.make (2)
 			register_parameter ("in_proj_weight", in_proj_weight)
 			register_parameter ("in_proj_bias", in_proj_bias)
 			register_child ("out_proj", out_proj)
@@ -92,8 +90,8 @@ feature -- Basic operations
 			q := split_heads (qkv.sliced (2, 1, c), b, t, h, d)
 			k := split_heads (qkv.sliced (2, c + 1, c), b, t, h, d)
 			v := split_heads (qkv.sliced (2, 2 * c + 1, c), b, t, h, d)
-			a := q.matmul_transposed (k, False, True).scaled ((1.0 / {DOUBLE_MATH}.sqrt (d)).truncated_to_real)
-			a := attention_dropout.forward (a.masked_fill (mask (t), -1.0e9).softmax)
+			a := q.matmul_transposed (k, False, True).causal_softmax ((1.0 / {DOUBLE_MATH}.sqrt (d)).truncated_to_real)
+			a := attention_dropout.forward (a)
 			y := a.matmul (v).reshaped (<<b, h, t, d>>).permuted (<<1, 3, 2, 4>>).reshaped (<<b, t, c>>)
 			Result := out_proj.forward (y)
 		ensure then
@@ -101,21 +99,6 @@ feature -- Basic operations
 		end
 
 feature {NONE} -- Implementation
-
-	facade: SIMPLE_TENSOR
-
-	masks: HASH_TABLE [INDEX_TENSOR, INTEGER]
-			-- Causal masks by sequence length.
-
-	mask (t: INTEGER): INDEX_TENSOR
-		do
-			if attached masks.item (t) as m then
-				Result := m
-			else
-				Result := facade.causal_mask (t)
-				masks.put (Result, t)
-			end
-		end
 
 	split_heads (z: TENSOR; b, t, h, d: INTEGER): TENSOR
 			-- (B*T, C) -> (B*H, T, D).

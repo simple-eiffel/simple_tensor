@@ -19,7 +19,9 @@ feature -- Source
 		require
 			known: has (a_name)
 		do
-			if a_name.same_string ("matmul") then
+			if a_name.same_string ("matmul_16") then
+				Result := Matmul_16
+			elseif a_name.same_string ("matmul") then
 				Result := Matmul
 			else
 				check attached bodies.item (a_name) as b then
@@ -30,7 +32,7 @@ feature -- Source
 
 	has (a_name: STRING_8): BOOLEAN
 		do
-			Result := a_name.same_string ("matmul") or bodies.has (a_name)
+			Result := a_name.same_string ("matmul") or a_name.same_string ("matmul_16") or bodies.has (a_name)
 		end
 
 feature {NONE} -- Shared GLSL
@@ -55,6 +57,66 @@ feature {NONE} -- Shared GLSL
 	]"
 
 	Matmul: STRING_8 = "[
+		#version 460
+		#extension GL_EXT_buffer_reference : require
+		layout(local_size_x = 16, local_size_y = 16) in;
+		layout(buffer_reference, std430, buffer_reference_align = 4) buffer F { float v[]; };
+		layout(push_constant) uniform P { F a; F b; F c; uint M; uint K; uint N; uint ta; uint tb; uint sh; } p;
+		// 64 x 64 output tile per group, 16 x 16 threads, each thread a 4 x 4 block of
+		// rows ty + 16i and columns tx + 16j (strided: conflict-free shared reads, coalesced
+		// writes). K advances 16 at a time through shared tiles As[k][m], Bs[k][n].
+		shared float As[16][64];
+		shared float Bs[16][64];
+		void main() {
+			uint z = gl_WorkGroupID.z;
+			uint ba = z * p.M * p.K;
+			uint bb = (p.sh != 0u) ? 0u : z * p.K * p.N;
+			uint bc = z * p.M * p.N;
+			uint tx = gl_LocalInvocationID.x;
+			uint ty = gl_LocalInvocationID.y;
+			uint tid = ty * 16u + tx;
+			uint row0 = gl_WorkGroupID.y * 64u;
+			uint col0 = gl_WorkGroupID.x * 64u;
+			float acc[4][4];
+			for (uint i = 0u; i < 4u; i++) for (uint j = 0u; j < 4u; j++) acc[i][j] = 0.0;
+			for (uint t = 0u; t < p.K; t += 16u) {
+				for (uint q = 0u; q < 4u; q++) {
+					uint e = tid + 256u * q;
+					uint mm; uint kk;
+					if (p.ta != 0u) { kk = e >> 6u; mm = e & 63u; } else { mm = e >> 4u; kk = e & 15u; }
+					uint gm = row0 + mm; uint gk = t + kk;
+					float av = 0.0;
+					if (gm < p.M && gk < p.K) av = (p.ta != 0u) ? p.a.v[ba + gk * p.M + gm] : p.a.v[ba + gm * p.K + gk];
+					As[kk][mm] = av;
+					uint nn; uint kb;
+					if (p.tb != 0u) { nn = e >> 4u; kb = e & 15u; } else { kb = e >> 6u; nn = e & 63u; }
+					uint gn = col0 + nn; uint gkb = t + kb;
+					float bv = 0.0;
+					if (gn < p.N && gkb < p.K) bv = (p.tb != 0u) ? p.b.v[bb + gn * p.K + gkb] : p.b.v[bb + gkb * p.N + gn];
+					Bs[kb][nn] = bv;
+				}
+				barrier();
+				for (uint k = 0u; k < 16u; k++) {
+					float ar[4]; float br[4];
+					for (uint i = 0u; i < 4u; i++) ar[i] = As[k][ty + 16u * i];
+					for (uint j = 0u; j < 4u; j++) br[j] = Bs[k][tx + 16u * j];
+					for (uint i = 0u; i < 4u; i++) for (uint j = 0u; j < 4u; j++) acc[i][j] += ar[i] * br[j];
+				}
+				barrier();
+			}
+			for (uint i = 0u; i < 4u; i++) {
+				uint r = row0 + ty + 16u * i;
+				if (r < p.M) {
+					for (uint j = 0u; j < 4u; j++) {
+						uint cc = col0 + tx + 16u * j;
+						if (cc < p.N) p.c.v[bc + r * p.N + cc] = acc[i][j];
+					}
+				}
+			}
+		}
+	]"
+
+	Matmul_16: STRING_8 = "[
 		#version 460
 		#extension GL_EXT_buffer_reference : require
 		layout(local_size_x = 16, local_size_y = 16) in;
@@ -116,7 +178,41 @@ feature {NONE} -- Kernel bodies
 			Result.put (Argmax_mask, "argmax_mask")
 			Result.put (Reduce_to, "reduce_to")
 			Result.put (Fill_random, "fill_random")
+			Result.put (Causal_softmax, "causal_softmax")
+			Result.put (Layer_norm, "layer_norm")
 		end
+
+	Causal_softmax: STRING_8 = "[
+		layout(push_constant) uniform P { F a; F o; uint rows; uint cols; float scale; } p;
+		void main() {
+			uint r = gid(); if (r >= p.rows) return;
+			uint q = r % p.cols;
+			uint b = r * p.cols;
+			float mx = p.scale * p.a.v[b];
+			for (uint c = 1u; c <= q; c++) mx = max(mx, p.scale * p.a.v[b + c]);
+			float s = 0.0;
+			for (uint c = 0u; c <= q; c++) s += exp(p.scale * p.a.v[b + c] - mx);
+			for (uint c = 0u; c < p.cols; c++) p.o.v[b + c] = (c <= q) ? exp(p.scale * p.a.v[b + c] - mx) / s : 0.0;
+		}
+	]"
+
+	Layer_norm: STRING_8 = "[
+		layout(push_constant) uniform P { F a; F w; F bias; F o; F mean; F rstd; uint rows; uint cols; float eps; } p;
+		void main() {
+			uint r = gid(); if (r >= p.rows) return;
+			uint b = r * p.cols;
+			float mu = 0.0;
+			for (uint c = 0u; c < p.cols; c++) mu += p.a.v[b + c];
+			mu /= float(p.cols);
+			float var = 0.0;
+			for (uint c = 0u; c < p.cols; c++) { float d = p.a.v[b + c] - mu; var += d * d; }
+			var /= float(p.cols);
+			float rs = inversesqrt(var + p.eps);
+			p.mean.v[r] = mu;
+			p.rstd.v[r] = rs;
+			for (uint c = 0u; c < p.cols; c++) p.o.v[b + c] = (p.a.v[b + c] - mu) * rs * p.w.v[c] + p.bias.v[c];
+		}
+	]"
 
 	Fill_random: STRING_8 = "[
 		layout(push_constant) uniform P { F o; uint n; int kind; float p1; float p2; float keep_value;
