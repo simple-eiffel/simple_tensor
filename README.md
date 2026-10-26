@@ -2,7 +2,7 @@
 
 Tensors, automatic gradients, optimizers and training for Eiffel. Everything is Eiffel: the hot loops are C inline inside Eiffel classes, and every fast kernel has a plain-Eiffel twin that checks it. No Python or outside ML library at run time.
 
-**Status: M1 complete (2026-10-25). CPU backend; the Vulkan GPU backend is milestone M3.**
+**Status (2026-10-26):** M1 (CPU) and M3b (GPU backend) are complete. M2 passed its gate: RixGPT trained from scratch in Eiffel on the GPU reaches train 1.510 and val 1.242 at step 500, against PyTorch's 1.511 and 1.201 (the gate is 1.201 ± 0.05). The full 5,000-step run, the M3 gate, is in progress.
 
 ## Installation
 
@@ -82,6 +82,42 @@ How it works:
 
 To use the oracle: `create f.make_with_backend (create {REFERENCE_BACKEND})`.
 
+### The GPU backend (simple_tensor_vulkan.ecf)
+
+VULKAN_BACKEND runs every operation as our own GLSL compute shader on any Vulkan GPU, through simple_vulkan 0.3.0. It lives in a separate ECF, so CPU-only users never need the Vulkan SDK.
+
+```xml
+<library name="simple_tensor_vulkan" location="$SIMPLE_EIFFEL/simple_tensor/simple_tensor_vulkan.ecf"/>
+```
+
+```eiffel
+create f.make_with_backend (create {VULKAN_BACKEND}.make)   -- the rest of the code is unchanged
+```
+
+- **Execution:**
+  - Kernels are recorded into one batch, and the GPU runs it when the host needs a value: a loss read, a download, a norm, or an index upload.
+  - Buffers are addressed straight from the shaders, so no descriptor sets are needed.
+  - Memory comes from a device-buffer pool. The collector recycles dead tensors into it without waiting on the GPU.
+- **Correctness:** every kernel, hot and cold, passes twin parity against REFERENCE_BACKEND (worst relative error 3.6e-7). Dropout masks drawn on the GPU are bit-identical to the oracle's, and training runs end to end on the GPU.
+- **Speed (RTX 5070 Ti, lean build):** a training step of a 4096×768 → 3072 → 768 MLP block takes 56 ms on the GPU, against 4,184 ms single-thread on the CPU.
+- **Running GPU programs:** put `%VULKAN_SDK%\Bin` on PATH; it holds shaderc_shared.dll.
+
+## Modules (src/nn)
+
+Building blocks with PyTorch's layouts and parameter names, so trained weights map one to one:
+
+| Class | What it is |
+|---|---|
+| NN_MODULE / NN_LAYER | Named parameters (`blocks.0.attn.in_proj_weight`); tied weights listed once; training mode. A layer's `forward` requires `accepts (x)`. |
+| NN_LINEAR | `y = x Wᵀ + b`, W is out×in; any input rank; can share another module's weight. |
+| NN_EMBEDDING | A table of learned rows, looked up by INDEX_TENSOR. |
+| NN_LAYER_NORM | Over the last axis (biased variance, eps), built from primitives. |
+| NN_DROPOUT | Inverted dropout with Philox masks, drawn on the input's backend. |
+| NN_MLP | Linear → GELU → Linear → Dropout. |
+| NN_CAUSAL_SELF_ATTENTION | Multi-head causal attention in nn.MultiheadAttention's layout (in_proj 3C×C, out_proj). |
+
+simple_rixgpt's `simple_rixgpt_train.ecf` builds RixGPT from these modules and trains it on the GPU.
+
 ## Memory
 
 Tensor data lives on the C heap, and the garbage collector can't see it. Two mechanisms keep memory bounded:
@@ -113,8 +149,8 @@ To run the benchmark: `ec.sh release -config simple_tensor.ecf -target simple_te
 |---|---|---|
 | M0 ✅ | Spikes: CPU matmul, GC behavior, GPU through simple_vulkan | Numbers measured |
 | M1 ✅ | Tensors, operations with backward, autograd, SGD/AdamW, safetensors | Every op passes its gradient check |
-| M2 | RixGPT (a character-level GPT) trained from scratch in Eiffel | Validation loss 1.201 ± 0.05 at step 500, matching PyTorch |
-| M3 | Vulkan GPU backend | GPU = CPU per op; the full RixGPT run reaches 0.78 |
+| M2 ✅ | RixGPT (a character-level GPT) trained from scratch in Eiffel | Validation loss 1.201 ± 0.05 at step 500: got 1.242 (train 1.510 vs 1.511) |
+| M3 | Vulkan GPU backend (M3b ✅: every kernel on the GPU, parity proven) | The full RixGPT run reaches 0.78 (running); then speed: our step takes about 1.5 s against PyTorch's 0.04 s |
 | M4 | Cactus Needle 3 forward pass (in simple_needle) | Parity with libneedle.dll |
 | M5 | Needle 3 LoRA fine-tune, exported to .cact | libneedle runs it and beats the untuned scores |
 
