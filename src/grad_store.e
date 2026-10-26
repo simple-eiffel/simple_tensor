@@ -85,9 +85,28 @@ feature -- Measurement
 			-- √(Σ over all gradients of Σ g²).
 		local
 			l_sum: REAL_64
+			l_storages: ARRAYED_LIST [TENSOR_STORAGE]
+			l_backend: detachable TENSOR_BACKEND
+			l_one_backend: BOOLEAN
 		do
+				-- One backend call when every gradient lives on the same backend (the GPU then
+				-- reads the norm back once instead of once per parameter).
+			create l_storages.make (gradients.count)
+			l_one_backend := True
 			across gradients as g loop
-				l_sum := l_sum + g.backend.sum_of_squares (g.storage)
+				if attached l_backend as b then
+					l_one_backend := l_one_backend and b.is_compatible (g.backend) and b.owns (g.storage)
+				else
+					l_backend := g.backend
+				end
+				l_storages.extend (g.storage)
+			end
+			if l_one_backend and attached l_backend as b then
+				l_sum := b.sum_of_squares_all (l_storages)
+			else
+				across gradients as g loop
+					l_sum := l_sum + g.backend.sum_of_squares (g.storage)
+				end
 			end
 			Result := {DOUBLE_MATH}.sqrt (l_sum)
 		ensure

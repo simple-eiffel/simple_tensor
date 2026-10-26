@@ -236,6 +236,41 @@ feature {NONE} -- Kernel bodies
 		}
 	]"
 
+	Reduce_to: STRING_8 = "[
+		layout(push_constant) uniform P { F a; F o; uint n_out; int rank; int kept; int dims[6]; } p;
+		// One workgroup per output element: its 256 threads split the reduced elements
+		// (a bias gradient sums thousands of rows into each of a few hundred outputs, so
+		// one thread per output left the GPU nearly idle), then a shared-memory tree sum.
+		shared float part[256];
+		void main() {
+			uint t = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+			if (t >= p.n_out) return;
+			uint lid = gl_LocalInvocationID.x;
+			int st[6]; int s = 1;
+			for (int k = p.rank - 1; k >= 0; k--) { st[k] = s; s *= p.dims[k]; }
+			uint rem = t; int base = 0; uint red = 1u;
+			for (int k = p.rank - 1; k >= 0; k--) {
+				if ((p.kept & (1 << k)) != 0) { uint d = uint(p.dims[k]); base += int(rem % d) * st[k]; rem /= d; }
+				else red *= uint(p.dims[k]);
+			}
+			float acc = 0.0;
+			for (uint r = lid; r < red; r += 256u) {
+				uint rr = r; int idx = base;
+				for (int k = p.rank - 1; k >= 0; k--) {
+					if ((p.kept & (1 << k)) == 0) { uint d = uint(p.dims[k]); idx += int(rr % d) * st[k]; rr /= d; }
+				}
+				acc += p.a.v[idx];
+			}
+			part[lid] = acc;
+			barrier();
+			for (uint w = 128u; w > 0u; w >>= 1u) {
+				if (lid < w) part[lid] += part[lid + w];
+				barrier();
+			}
+			if (lid == 0u) p.o.v[t] = part[0];
+		}
+	]"
+
 	Fill_random: STRING_8 = "[
 		layout(push_constant) uniform P { F o; uint n; int kind; float p1; float p2; float keep_value;
 			uint key0; uint key1; uint pos_lo; uint pos_hi; uint thr; uint all_keep; } p;
@@ -545,29 +580,6 @@ feature {NONE} -- Kernel bodies
 			uint best = 0u;
 			for (uint j = 1u; j < p.nn; j++) if (p.a.v[base + j * p.inner] > p.a.v[base + best * p.inner]) best = j;
 			for (uint j = 0u; j < p.nn; j++) p.o.v[base + j * p.inner] = (j == best) ? 1.0 : 0.0;
-		}
-	]"
-
-	Reduce_to: STRING_8 = "[
-		layout(push_constant) uniform P { F a; F o; uint n_out; int rank; int kept; int dims[6]; } p;
-		void main() {
-			uint t = gid(); if (t >= p.n_out) return;
-			int st[6]; int s = 1;
-			for (int k = p.rank - 1; k >= 0; k--) { st[k] = s; s *= p.dims[k]; }
-			uint rem = t; int base = 0; uint red = 1u;
-			for (int k = p.rank - 1; k >= 0; k--) {
-				if ((p.kept & (1 << k)) != 0) { uint d = uint(p.dims[k]); base += int(rem % d) * st[k]; rem /= d; }
-				else red *= uint(p.dims[k]);
-			}
-			float acc = 0.0;
-			for (uint r = 0u; r < red; r++) {
-				uint rr = r; int idx = base;
-				for (int k = p.rank - 1; k >= 0; k--) {
-					if ((p.kept & (1 << k)) == 0) { uint d = uint(p.dims[k]); idx += int(rr % d) * st[k]; rr /= d; }
-				}
-				acc += p.a.v[idx];
-			}
-			p.o.v[t] = acc;
 		}
 	]"
 

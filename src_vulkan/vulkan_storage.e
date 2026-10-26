@@ -54,8 +54,8 @@ feature {NONE} -- Initialization
 			raw_context := a_context.handle
 			raw_buffer := buffer.handle
 			last_transfer_ok := buffer.is_valid and then buffer.record_fill (0, byte_count, 0)
-			check
-				zeroed: last_transfer_ok
+			if not last_transfer_ok then
+				fail_loudly ("GPU transfer failed (zeroed) - device lost or out of memory")
 			end
 		ensure
 			counted: count = a_count
@@ -113,8 +113,8 @@ feature {TENSOR_BACKEND, TENSOR, TENSOR_OP, TENSOR_OPTIMIZER, SAFETENSORS_FILE, 
 			create l_one.make (4)
 			l_one.put_real_32 (v, 0)
 			last_transfer_ok := buffer.write (l_one.item, 4, i.to_integer_64 * 4)
-			check
-				written: last_transfer_ok
+			if not last_transfer_ok then
+				fail_loudly ("GPU transfer failed (written) - device lost or out of memory")
 			end
 			if is_mirror_valid and then attached mirror as m then
 				m.put_real_32 (v, i * 4)
@@ -151,8 +151,8 @@ feature {VULKAN_BACKEND} -- Kernel access
 			target: a_target /= default_pointer
 		do
 			last_transfer_ok := buffer.read (a_target, byte_count, 0)
-			check
-				read: last_transfer_ok
+			if not last_transfer_ok then
+				fail_loudly ("GPU transfer failed (read) - device lost or out of memory")
 			end
 		end
 
@@ -163,8 +163,8 @@ feature {VULKAN_BACKEND} -- Kernel access
 			source: a_source /= default_pointer
 		do
 			last_transfer_ok := buffer.write (a_source, byte_count, 0)
-			check
-				written: last_transfer_ok
+			if not last_transfer_ok then
+				fail_loudly ("GPU transfer failed (written) - device lost or out of memory")
 			end
 			is_mirror_valid := False
 		ensure
@@ -191,8 +191,8 @@ feature {NONE} -- Implementation
 					mirror := m
 				end
 				last_transfer_ok := buffer.read (m.item, byte_count, 0)
-				check
-					read: last_transfer_ok
+				if not last_transfer_ok then
+					fail_loudly ("GPU transfer failed (read) - device lost or out of memory")
 				end
 				is_mirror_valid := True
 			end
@@ -210,6 +210,16 @@ feature {NONE} -- Implementation
 				raw_buffer := default_pointer
 				is_released := True
 			end
+		end
+
+	fail_loudly (a_message: STRING_8)
+			-- Raise: a failed GPU transfer must never pass silently.
+		local
+			l_failure: DEVELOPER_EXCEPTION
+		do
+			l_failure := create {DEVELOPER_EXCEPTION}
+			l_failure.set_description (a_message)
+			l_failure.raise
 		end
 
 	raw_context, raw_buffer: POINTER

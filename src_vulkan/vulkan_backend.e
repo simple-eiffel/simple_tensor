@@ -18,7 +18,8 @@ class
 inherit
 	TENSOR_BACKEND
 		redefine
-			is_compatible
+			is_compatible,
+			sum_of_squares_all
 		end
 
 create
@@ -143,14 +144,18 @@ feature -- Kernels: fill and copy (recorded transfer commands)
 			create l_word.make (4)
 			l_word.put_real_32 (a_value, 0)
 			last_record_ok := gpu (a_out).buffer.record_fill (0, gpu (a_out).byte_count, l_word.read_natural_32 (0))
-			check recorded: last_record_ok end
+			if not last_record_ok then
+				fail_loudly ("GPU command failed (recorded) - device lost or out of memory")
+			end
 			gpu (a_out).invalidate
 		end
 
 	copy_values (a, a_out: TENSOR_STORAGE)
 		do
 			last_record_ok := gpu (a).buffer.record_copy_to (gpu (a_out).buffer, 0, 0, gpu (a).byte_count)
-			check recorded: last_record_ok end
+			if not last_record_ok then
+				fail_loudly ("GPU command failed (recorded) - device lost or out of memory")
+			end
 			gpu (a_out).invalidate
 		end
 
@@ -253,7 +258,7 @@ feature -- Kernels: reductions
 				p.address (addr (a)); p.address (addr (a_out))
 				p.natural (a_out.count); p.integer (a_from.rank); p.integer (l_kept)
 				p.integers_6 (a_from.to_array)
-				run ("reduce_to", p, a_out.count)
+				run_per_output ("reduce_to", p, a_out.count)
 			else
 				note_fallback ("reduce_to_shape")
 				ha := to_host (a); hout := host_out (a_out, False)
@@ -442,11 +447,13 @@ feature -- Kernels: indexing
 				l_next [r] := l_at + 1
 				i := i + 1
 			end
-			create l_offsets_buffer.make (context, l_offsets.count.to_integer_64)
-			create l_positions_buffer.make (context, l_positions.count.to_integer_64)
-			last_record_ok := l_offsets_buffer.write (l_offsets.item, l_offsets.count.to_integer_64, 0)
-				and l_positions_buffer.write (l_positions.item, l_positions.count.to_integer_64, 0)
-			check written: last_record_ok end
+			l_offsets_buffer := scratch (l_offsets.count.to_integer_64)
+			l_positions_buffer := scratch (l_positions.count.to_integer_64)
+			last_record_ok := l_offsets_buffer.record_write (l_offsets.item, l_offsets.count.to_integer_64, 0)
+				and l_positions_buffer.record_write (l_positions.item, l_positions.count.to_integer_64, 0)
+			if not last_record_ok then
+				fail_loudly ("GPU command failed (written) - device lost or out of memory")
+			end
 			create p.make
 			p.address (addr (a_grad)); p.address (l_offsets_buffer.address); p.address (l_positions_buffer.address)
 			p.address (addr (a_out))
@@ -465,7 +472,7 @@ feature -- Kernels: losses
 			l_t, l_rows: VULKAN_DEVICE_BUFFER
 		do
 			l_t := index_buffer (a_targets)
-			create l_rows.make (context, a_rows.to_integer_64 * 4)
+			l_rows := scratch (a_rows.to_integer_64 * 4)
 			create p.make
 			p.address (addr (a_logits)); p.address (l_t.address); p.address (l_rows.address)
 			p.natural (a_rows); p.natural (a_classes); p.integer (a_ignore)
@@ -686,10 +693,55 @@ feature {NONE} -- Dispatch
 			run_groups (a_name, p, gx, gy, 1)
 		end
 
+	run_per_output (a_name: STRING_8; p: VULKAN_PUSH_BLOCK; a_outputs: INTEGER)
+			-- Record `a_name' with one workgroup per output element (2-D group grid).
+		local
+			gx, gy: INTEGER
+		do
+			gx := a_outputs.max (1).min (65535)
+			gy := (a_outputs.max (1) + gx - 1) // gx
+			run_groups (a_name, p, gx, gy, 1)
+		end
+
 	run_groups (a_name: STRING_8; p: VULKAN_PUSH_BLOCK; gx, gy, gz: INTEGER)
 		do
 			last_record_ok := pipeline (a_name).record (p.block.item, p.size, gx, gy, gz)
-			check recorded: last_record_ok end
+			if not last_record_ok then
+				fail_loudly ("GPU command failed (recorded) - device lost or out of memory")
+			end
+		end
+
+	sum_of_squares_all (a_list: ARRAYED_LIST [TENSOR_STORAGE]): REAL_64
+			-- Every storage's 256 partials recorded into one buffer, read back once.
+		local
+			p: VULKAN_PUSH_BLOCK
+			l_part: VULKAN_DEVICE_BUFFER
+			l_host: MANAGED_POINTER
+			i, k: INTEGER
+		do
+			if not a_list.is_empty then
+				l_part := scratch (a_list.count.to_integer_64 * 512 * 4)
+				k := 0
+				across a_list as s loop
+					create p.make
+					p.address (addr (s)); p.address (l_part.address + (k * 512 * 4).to_natural_64); p.natural (s.count)
+					run_groups ("norm_partials", p, 256, 1, 1)
+					k := k + 1
+				end
+				create l_host.make (a_list.count * 512 * 4)
+				last_record_ok := l_part.read (l_host.item, a_list.count.to_integer_64 * 512 * 4, 0)
+				if not last_record_ok then
+					fail_loudly ("GPU command failed (read) - device lost or out of memory")
+				end
+				from i := 0 until i = a_list.count * 256 loop
+					Result := Result + l_host.read_real_32 (8 * i)
+					if l_host.read_real_32 (8 * i + 4) /= 0.0 then
+						Result := {REAL_64}.nan
+					end
+					i := i + 1
+				end
+				l_part.release_deferred
+			end
 		end
 
 	norm_partials (a: TENSOR_STORAGE): TUPLE [sum: REAL_64; bad: BOOLEAN]
@@ -702,13 +754,15 @@ feature {NONE} -- Dispatch
 			l_sum: REAL_64
 			l_bad: BOOLEAN
 		do
-			create l_part.make (context, 512 * 4)
+			l_part := scratch (512 * 4)
 			create p.make
 			p.address (addr (a)); p.address (l_part.address); p.natural (a.count)
 			run_groups ("norm_partials", p, 256, 1, 1)
 			create l_host.make (512 * 4)
 			last_record_ok := l_part.read (l_host.item, 512 * 4, 0)
-			check read: last_record_ok end
+			if not last_record_ok then
+				fail_loudly ("GPU command failed (read) - device lost or out of memory")
+			end
 			from i := 0 until i = 256 loop
 				l_sum := l_sum + l_host.read_real_32 (8 * i)
 				l_bad := l_bad or l_host.read_real_32 (8 * i + 4) /= 0.0
@@ -719,12 +773,50 @@ feature {NONE} -- Dispatch
 		end
 
 	index_buffer (ix: INDEX_TENSOR): VULKAN_DEVICE_BUFFER
-			-- `ix' uploaded to the GPU (a write: it runs the recorded batch first).
+			-- `ix' uploaded to the GPU as a recorded copy (no flush: simple_vulkan 0.5.0).
 			-- The caller releases it (deferred) after recording its use.
 		do
-			create Result.make (context, ix.count.to_integer_64 * 4)
-			last_record_ok := Result.write (ix.address, ix.count.to_integer_64 * 4, 0)
-			check written: last_record_ok end
+			Result := scratch (ix.count.to_integer_64 * 4)
+			last_record_ok := Result.record_write (ix.address, ix.count.to_integer_64 * 4, 0)
+			if not last_record_ok then
+				fail_loudly ("GPU command failed (written) - device lost or out of memory")
+			end
+		end
+
+	fail_loudly (a_message: STRING_8)
+			-- Raise: a failed GPU command must never pass silently (in a lean build a
+			-- `check' is off and kernels would go on writing garbage).
+		local
+			l_failure: DEVELOPER_EXCEPTION
+		do
+			l_failure := create {DEVELOPER_EXCEPTION}
+			l_failure.set_description (a_message)
+			l_failure.raise
+		end
+
+	scratch (a_bytes: INTEGER_64): VULKAN_DEVICE_BUFFER
+			-- A device buffer for a kernel's indices or partial results. Out of memory is
+			-- handled as VULKAN_STORAGE does: collect, trim the pool, flush, retry once,
+			-- then raise (never hand a kernel an invalid buffer: address 0).
+		require
+			positive: a_bytes > 0
+		local
+			l_failure: DEVELOPER_EXCEPTION
+		do
+			create Result.make (context, a_bytes)
+			if not Result.is_valid then
+				(create {MEMORY}).full_collect
+				context.trim_pool
+				context.flush
+				create Result.make (context, a_bytes)
+				if not Result.is_valid then
+					l_failure := create {DEVELOPER_EXCEPTION}
+					l_failure.set_description ("GPU out of memory: cannot allocate " + a_bytes.out + " bytes of kernel scratch")
+					l_failure.raise
+				end
+			end
+		ensure
+			valid: Result.is_valid
 		end
 
 	valid_targets (a_targets: INDEX_TENSOR; a_ignore: INTEGER): INTEGER

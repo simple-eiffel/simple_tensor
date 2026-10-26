@@ -196,6 +196,20 @@ feature -- Kernels: reductions
 			non_negative: Result >= 0.0 or Result /= Result
 		end
 
+	sum_of_squares_all (a_list: ARRAYED_LIST [TENSOR_STORAGE]): REAL_64
+			-- Σ over the storages of Σ a², accumulated in REAL_64 (a gradient's global norm).
+			-- One host read on backends that batch it (VULKAN_BACKEND); here, one per storage.
+		require
+			owned: across a_list as s all owns (s) end
+			live: across a_list as s all not s.is_released end
+		do
+			across a_list as s loop
+				Result := Result + sum_of_squares (s)
+			end
+		ensure
+			non_negative: Result >= 0.0 or Result /= Result
+		end
+
 	has_non_finite (a: TENSOR_STORAGE): BOOLEAN
 			-- Does `a' hold a NaN or an infinity?
 		require

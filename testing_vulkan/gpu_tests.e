@@ -64,6 +64,7 @@ feature -- GPU tests
 			t.compare_named ("cross_entropy_grad", agent twin_cross_entropy (?, True))
 			t.compare_named ("adamw_update (3 steps)", agent twin_adamw)
 			t.compare_named ("sum_of_squares + has_non_finite (global norm)", agent twin_norm)
+			t.compare_named ("global norm over several gradients (one read)", agent twin_global_norm)
 			print ("      GPU twin parity (hot): worst relative error " + t.worst_relative_error.out + " (" + t.last_report + ")%N")
 			assert ("GPU hot kernels match the oracle within 1e-4 (" + t.last_report + ")", t.within (1.0e-4))
 		end
@@ -256,6 +257,18 @@ feature {NONE} -- Cold-kernel twin cases
 				.concatenated (at.matmul_transposed (bt, True, True).reshaped (<<6300>>), 1)
 				.concatenated (ab.matmul (bb).reshaped (<<18900>>), 1)
 				.concatenated (ab.matmul (b).reshaped (<<18900>>), 1)
+		end
+
+	twin_global_norm (f: SIMPLE_TENSOR): TENSOR
+		local
+			a, b, c: TENSOR
+			g: GRAD_STORE
+		do
+			a := f.parameter (seeded (f, <<300, 7>>, -1.0, 1.0, 130))
+			b := f.parameter (seeded (f, <<13>>, -1.0, 1.0, 131))
+			c := f.parameter (seeded (f, <<50, 50>>, -1.0, 1.0, 132))
+			g := ((a * a).sum_all + (b * b * b).sum_all + (c * a.sliced (1, 1, 50).sum (2, True)).sum_all).backward
+			Result := f.from_array (<<g.global_norm.truncated_to_real>>, <<1>>)
 		end
 
 	twin_linear (f: SIMPLE_TENSOR): TENSOR
