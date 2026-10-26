@@ -14,7 +14,7 @@ set SIMPLE_EIFFEL=D:\prod
 <library name="simple_tensor" location="$SIMPLE_EIFFEL/simple_tensor/simple_tensor.ecf"/>
 ```
 
-Needs simple_math 0.2.0+ (`tanh`, `erf`), simple_randomizer 1.1.0+ (Gaussian draws) and simple_file 1.2.0+ (bulk binary I/O), plus simple_mml and simple_json.
+Needs simple_math 0.2.0+ (`tanh`, `erf`), simple_randomizer 1.2.0+ (the Philox4x32-10 generator) and simple_file 1.2.0+ (bulk binary I/O), plus simple_mml and simple_json.
 
 ## Quick start
 
@@ -68,7 +68,7 @@ How it works:
 - SGD_OPTIMIZER and ADAMW_OPTIMIZER (decoupled weight decay, as in PyTorch).
 - Learning-rate schedules: CONSTANT_SCHEDULE; WARMUP_COSINE_SCHEDULE (linear warmup, cosine decay to a floor).
 - GRAD_STORE: `global_norm`, `clip_global_norm`, `has_non_finite`, `scale_all`, `merge`.
-- TENSOR_RANDOM: seeded uniform, normal and dropout-mask fills.
+- TENSOR_RANDOM: seeded uniform, normal and dropout-mask fills from Philox4x32-10, a counter-based generator: every value has a fixed address in the stream, so a GPU kernel can reproduce the same mask.
 - TOKEN_BATCHER: random blocks of a token stream, with targets shifted by one.
 
 **Files.** SAFETENSORS_FILE loads and saves the Hugging Face `.safetensors` format. It reads F32, F16 and BF16 and writes F32.
@@ -105,7 +105,7 @@ To run the benchmark: `ec.sh release -config simple_tensor.ecf -target simple_te
 
 ## Tests
 
-`ec.sh test -config simple_tensor.ecf -target simple_tensor_tests`, then run `EIFGENs/simple_tensor_tests/F_code/simple_tensor.exe`. There are 18 tests, all real; the evidence is in `.eiffel-workflow/evidence/phase4-compile.txt`.
+`ec.sh test -config simple_tensor.ecf -target simple_tensor_tests`, then run `EIFGENs/simple_tensor_tests/F_code/simple_tensor.exe`. There are 32 tests, all real. They include adversarial ones: hostile model files, extreme values, two trainers on separate processors, and a 5,000-step stress run. The evidence is in `.eiffel-workflow/evidence/` (phase4-compile.txt, phase5-tests.txt, phase6-tests.txt).
 
 ## Roadmap
 

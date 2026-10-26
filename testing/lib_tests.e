@@ -884,6 +884,53 @@ feature -- Adversarial (Phase 6)
 			assert ("new budget governs", b.collections = 2 and b.allocated_since_collect = 2)
 		end
 
+	test_random_addresses_are_fixed
+			-- G-6 contract for GPU parity: after any earlier draws, element i of a keep mask
+			-- equals an independent SIMPLE_PHILOX's word (p + i) test; a normal fill of
+			-- 100,000 has mean 0 and std 1 within 3 sigma; positions advance as specified.
+		local
+			f: SIMPLE_TENSOR
+			r: TENSOR_RANDOM
+			m, z: TENSOR
+			p: SIMPLE_PHILOX
+			l_start: NATURAL_64
+			i: INTEGER
+			l_expected: REAL_32
+			l_sum, l_sum_sq, l_mean, l_std: REAL_64
+		do
+			create f.make
+			create r.make (2026)
+			r.draw_index (50)
+			r.fill_uniform (f.zeros (<<3, 7>>), 0.0, 1.0)
+			l_start := r.position
+			assert ("advanced 1 + 21", l_start = 22)
+			m := f.zeros (<<64, 64>>)
+			r.fill_keep_mask (m, 0.9)
+			create p.make (2026, 0)
+			from i := 0 until i = 4096 loop
+				if p.unit_of (p.word (l_start + i.to_natural_64)) < 0.9 then
+					l_expected := (1.0 / 0.9).truncated_to_real
+				else
+					l_expected := 0.0
+				end
+				assert ("mask element " + i.out, m.item (i) = l_expected)
+				i := i + 1
+			end
+			z := f.zeros (<<100_000>>)
+			r.fill_normal (z, 0.0, 1.0)
+			assert ("normal used two words each", r.position = l_start + 4096 + 200_000)
+			from i := 0 until i = 100_000 loop
+				l_sum := l_sum + z.item (i)
+				l_sum_sq := l_sum_sq + z.item (i) * z.item (i)
+				i := i + 1
+			end
+			l_mean := l_sum / 100_000
+			l_std := {DOUBLE_MATH}.sqrt (l_sum_sq / 100_000 - l_mean * l_mean)
+			print ("      Philox normal fill: mean " + l_mean.out + ", std " + l_std.out + "%N")
+			assert ("mean", l_mean.abs < 0.0095)
+			assert ("std", (l_std - 1.0).abs < 0.01)
+		end
+
 feature {NONE} -- Probes
 
 	make_batcher (a_tokens: INDEX_TENSOR; a_block: INTEGER; r: TENSOR_RANDOM)

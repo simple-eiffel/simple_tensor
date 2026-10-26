@@ -53,6 +53,7 @@ feature {NONE} -- Initialization
 			run (agent t.test_stress_many_small_steps, "stress: 5,000 small steps")
 			run (agent t.test_batcher_tightest_corpus, "batcher on the tightest corpus")
 			run (agent t.test_budget_lowered_mid_run, "budget lowered mid-run collects")
+			run (agent t.test_random_addresses_are_fixed, "random values have fixed stream addresses (G-6)")
 			-- SCOOP consumer (compile-time compatibility of the main types)
 			run (agent (create {TEST_SCOOP_CONSUMER}).test_scoop_compatibility, "SCOOP consumer compiles and creates the main types")
 			print ("%N===================%NResults: " + passed.out + " passed, " + failed.out + " failed%N")

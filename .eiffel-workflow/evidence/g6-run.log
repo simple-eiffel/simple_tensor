@@ -1,0 +1,46 @@
+simple_tensor tests
+===================
+  PASS: shape basics
+  PASS: shape broadcast rules
+  PASS: storage budget forces a collection
+      51 gradient checks run, worst |analytic - numeric| = 4.2445920606537513e-05
+  PASS: gradient check: every primitive
+      twin parity: worst relative error 1.9371509552001953e-07 (matmul batched shared B element 174: oracle -0.173327, candidate -0.173327)
+  PASS: twin parity: every CPU kernel
+  PASS: tied weight accumulates both gradients
+  PASS: frozen leaf gets no gradient
+  PASS: AdamW 3-step hand trace
+  PASS: schedule equals rixgpt.py lr_at
+  PASS: same seed, same losses
+  PASS: non-finite gradients detected
+  PASS: safetensors round trip
+  PASS: batcher targets are inputs shifted by one
+      memory: rise over start 17 MB while churning ~457 MB (budget 16 MB)
+  PASS: 1,000 steps stay within the memory budget
+      GC probe: worst root allocation 8 ms with training on another processor (4 steps in 4294 ms, launched just before a ~2000 ms window), baseline 6 ms
+  PASS: GC probe: other processor's worst allocation under 10 ms
+      CPU matmul (DbC test build): 34 GFLOP/s; the AC-9 gate runs in the lean bench target
+  PASS: CPU matmul throughput recorded (gate in lean target)
+      XOR after 500 AdamW steps: loss 1.25767e-16
+  PASS: README quick start learns XOR
+  PASS: zeros_like, ones_like, to_backend round trip
+  PASS: GRAD_STORE scale, clip, merge
+  PASS: SGD hand trace on both backends
+  PASS: random index range and dropout mask
+  PASS: shared storage guards release
+  PASS: preconditions reject misuse
+  PASS: hostile safetensors files refused
+  PASS: extreme values stay finite or are flagged
+  PASS: backward twice, diamond, 5,000-op chain
+      two processors: losses 0.880476, 0.880476; root 0.880476
+  PASS: two trainers on separate processors
+      stress: 5,000 steps, loss 0.088198 -> 0.0410901, memory rise 0 MB
+  PASS: stress: 5,000 small steps
+  PASS: batcher on the tightest corpus
+  PASS: budget lowered mid-run collects
+      Philox normal fill: mean 0.0041194288141204564, std 1.0018006098176342
+  PASS: random values have fixed stream addresses (G-6)
+  PASS: SCOOP consumer compiles and creates the main types
+
+===================
+Results: 32 passed, 0 failed
