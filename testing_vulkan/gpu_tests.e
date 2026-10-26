@@ -1,0 +1,202 @@
+note
+	description: "[
+		M3b GPU suite: the M1 twin cases, unchanged, with VULKAN_BACKEND as the candidate,
+		plus parity cases for the COLD kernels (on CPU they are HOST_BACKEND code shared
+		with the oracle, so M1 never twin-checked them; on the GPU they are new GLSL).
+		Gradient checks stay on the oracle by design (spec 03 A-S04): autograd is
+		backend-independent, and every forward and backward kernel it calls is checked
+		here against REFERENCE_BACKEND. Training end to end must track the oracle.
+	]"
+	author: "Larry Rix"
+
+class
+	GPU_TESTS
+
+inherit
+	LIB_TESTS
+
+feature -- GPU tests
+
+	test_gpu_storage_basics
+			-- from_array/to_array round trip, mirror reads, upload invalidating the mirror,
+			-- fill, zeros, copy (parameter), release.
+		local
+			t, c: TENSOR
+			l_values: ARRAY [REAL_32]
+		do
+			t := gpu.from_array (<<1.5, -2.0, 3.25, 0.0, 7.0, -0.5>>, <<2, 3>>)
+			assert ("on the GPU", t.backend.kind = t.backend.Vulkan_backend_kind)
+			l_values := t.to_array
+			assert ("round trip", l_values [1] = 1.5 and l_values [3] = 3.25 and l_values [6] = -0.5)
+			assert ("mirror item", t.item (4) = 7.0)
+			t.backend.upload (<<1.5, -2.0, 3.25, 0.0, 9.0, -0.5>>, t.storage)
+			assert ("upload invalidates the mirror", t.item (4) = 9.0 and t.to_array [5] = 9.0)
+			c := gpu.filled (<<1000>>, 0.25)
+			assert ("fill", c.item (0) = 0.25 and c.item (999) = 0.25)
+			c := gpu.zeros (<<4>>)
+			assert ("zeros", c.item (3) = 0.0)
+			c := gpu.parameter (t)
+			assert ("copy (parameter)", c.item (4) = 9.0 and c.storage /= t.storage)
+			c := t.scaled (2.0)
+			c.release
+			assert ("released", c.is_released)
+		end
+
+	test_gpu_twin_parity
+			-- Every hot kernel on the GPU within 1e-4 relative of REFERENCE_BACKEND.
+		local
+			t: TWIN_CHECKER
+		do
+			create t.make (oracle, gpu)
+			t.compare_named ("binary (same shape and broadcast)", agent twin_binary)
+			t.compare_named ("unary (all eleven kinds)", agent twin_unary)
+			t.compare_named ("unary_derivative (gradient of all eleven)", agent twin_unary_gradient)
+			t.compare_named ("reduce (sum, mean, max)", agent twin_reduce)
+			t.compare_named ("matmul plain", agent twin_matmul (?, False, False, False))
+			t.compare_named ("matmul ta", agent twin_matmul (?, True, False, False))
+			t.compare_named ("matmul tb", agent twin_matmul (?, False, True, False))
+			t.compare_named ("matmul batched shared B", agent twin_matmul (?, False, False, True))
+			t.compare_named ("softmax", agent twin_softmax (?, False))
+			t.compare_named ("log_softmax", agent twin_softmax (?, True))
+			t.compare_named ("gather_rows + scatter_add_rows", agent twin_gather_scatter)
+			t.compare_named ("cross_entropy (loss)", agent twin_cross_entropy (?, False))
+			t.compare_named ("cross_entropy_grad", agent twin_cross_entropy (?, True))
+			t.compare_named ("adamw_update (3 steps)", agent twin_adamw)
+			t.compare_named ("sum_of_squares + has_non_finite (global norm)", agent twin_norm)
+			print ("      GPU twin parity (hot): worst relative error " + t.worst_relative_error.out + " (" + t.last_report + ")%N")
+			assert ("GPU hot kernels match the oracle within 1e-4 (" + t.last_report + ")", t.within (1.0e-4))
+		end
+
+	test_gpu_cold_parity
+			-- The cold kernels on the GPU within 1e-4 relative of REFERENCE_BACKEND.
+		local
+			t: TWIN_CHECKER
+		do
+			create t.make (oracle, gpu)
+			t.compare_named ("permute 2D and 3D", agent twin_permute)
+			t.compare_named ("slice + add_slice (slice backward)", agent twin_slice)
+			t.compare_named ("concat + its backward", agent twin_concat)
+			t.compare_named ("masked_fill (causal) + backward", agent twin_masked_fill)
+			t.compare_named ("reduce_to_shape (broadcast backward)", agent twin_reduce_to)
+			t.compare_named ("argmax_mask (max backward)", agent twin_argmax)
+			t.compare_named ("sgd_update (2 steps)", agent twin_sgd)
+			t.compare_named ("fill + copy", agent twin_fill_copy)
+			print ("      GPU twin parity (cold): worst relative error " + t.worst_relative_error.out + " (" + t.last_report + ")%N")
+			assert ("GPU cold kernels match the oracle within 1e-4 (" + t.last_report + ")", t.within (1.0e-4))
+		end
+
+	test_gpu_training_tracks_oracle
+			-- 20 AdamW steps of the M1 training fixture: GPU losses within 1e-3 of the oracle's.
+		local
+			g, o: ARRAY [REAL_32]
+		do
+			g := training_losses (gpu, 4242)
+			o := training_losses (oracle, 4242)
+			print ("      GPU training: loss " + g [1].out + " -> " + g [20].out + " (oracle " + o [20].out + ")%N")
+			assert ("GPU tracks the oracle", across 1 |..| 20 as k all (g [k] - o [k]).abs <= 1.0e-3 * o [k].abs.max (1.0) end)
+		end
+
+	test_gpu_fallback_ledger
+			-- Report which kernels ran as host fallbacks during this suite (M3b gate 3 reads it).
+		do
+			if attached {VULKAN_BACKEND} gpu.backend as v then
+				print ("      GPU device: " + v.device_name + "; host fallbacks so far: " + v.fallback_total.out + "%N")
+				across v.fallback_counts as c loop
+					print ("        " + @c.key + ": " + c.out + "%N")
+				end
+			end
+		end
+
+feature {NONE} -- Cold-kernel twin cases
+
+	twin_permute (f: SIMPLE_TENSOR): TENSOR
+		local
+			x: TENSOR
+		do
+			x := seeded (f, <<2, 3, 4>>, -1.0, 1.0, 81)
+			Result := x.permuted (<<3, 1, 2>>).reshaped (<<24>>)
+				.concatenated (x.permuted (<<2, 3, 1>>).reshaped (<<24>>), 1)
+				.concatenated (seeded (f, <<5, 7>>, -1.0, 1.0, 82).transposed.reshaped (<<35>>), 1)
+		end
+
+	twin_slice (f: SIMPLE_TENSOR): TENSOR
+		local
+			x, w: TENSOR
+		do
+			x := f.parameter (seeded (f, <<3, 6, 2>>, -1.0, 1.0, 83))
+			w := seeded (f, <<3, 3, 2>>, -1.0, 1.0, 84)
+			Result := x.sliced (2, 3, 3).reshaped (<<18>>)
+				.concatenated ((x.sliced (2, 3, 3) * w).sum_all.backward.gradient (x).reshaped (<<36>>), 1)
+		end
+
+	twin_concat (f: SIMPLE_TENSOR): TENSOR
+		local
+			a, b, w: TENSOR
+		do
+			a := f.parameter (seeded (f, <<2, 3, 2>>, -1.0, 1.0, 85))
+			b := f.parameter (seeded (f, <<2, 1, 2>>, -1.0, 1.0, 86))
+			w := seeded (f, <<2, 4, 2>>, -1.0, 1.0, 87)
+			Result := a.concatenated (b, 2).reshaped (<<16>>)
+				.concatenated ((a.concatenated (b, 2) * w).sum_all.backward.gradient (b).reshaped (<<4>>), 1)
+		end
+
+	twin_masked_fill (f: SIMPLE_TENSOR): TENSOR
+		local
+			x, w: TENSOR
+		do
+			x := f.parameter (seeded (f, <<2, 4, 4>>, -1.0, 1.0, 88))
+			w := seeded (f, <<2, 4, 4>>, -1.0, 1.0, 89)
+			Result := x.masked_fill (f.causal_mask (4), -1.0e9).softmax.reshaped (<<32>>)
+				.concatenated ((x.masked_fill (f.causal_mask (4), 0.0) * w).sum_all.backward.gradient (x).reshaped (<<32>>), 1)
+		end
+
+	twin_reduce_to (f: SIMPLE_TENSOR): TENSOR
+		local
+			x, b, w: TENSOR
+		do
+			x := seeded (f, <<3, 4, 5>>, -1.0, 1.0, 90)
+			b := f.parameter (seeded (f, <<4, 1>>, -1.0, 1.0, 91))
+			w := seeded (f, <<3, 4, 5>>, -1.0, 1.0, 92)
+			Result := ((x + b) * w).sum_all.backward.gradient (b).reshaped (<<4>>)
+				.concatenated (x.reduced_to (create {TENSOR_SHAPE}.make (<<1, 5>>)).reshaped (<<5>>), 1)
+		end
+
+	twin_argmax (f: SIMPLE_TENSOR): TENSOR
+		local
+			x: TENSOR
+		do
+			x := f.parameter (seeded (f, <<3, 7>>, -1.0, 1.0, 93))
+			Result := x.maximum (2, False).sum_all.backward.gradient (x).reshaped (<<21>>)
+				.concatenated (x.maximum (1, False).sum_all.backward.gradient (x).reshaped (<<21>>), 1)
+		end
+
+	twin_sgd (f: SIMPLE_TENSOR): TENSOR
+		local
+			w: TENSOR
+			opt: SGD_OPTIMIZER
+		do
+			w := f.parameter (seeded (f, <<4, 5>>, -1.0, 1.0, 94))
+			create opt.make (create {ARRAYED_LIST [TENSOR]}.make_from_array (<<w>>), create {CONSTANT_SCHEDULE}.make (0.1))
+			opt.step ((w * w * w).sum_all.backward)
+			opt.step ((w * w * w).sum_all.backward)
+			Result := w.detached
+		end
+
+	twin_fill_copy (f: SIMPLE_TENSOR): TENSOR
+		local
+			x: TENSOR
+		do
+			x := seeded (f, <<3, 5>>, -1.0, 1.0, 95)
+			Result := f.filled (<<7>>, -0.375).concatenated (f.parameter (x).reshaped (<<15>>), 1)
+				.concatenated (x.zeros_like.reshaped (<<15>>), 1).concatenated (x.ones_like.reshaped (<<15>>), 1)
+		end
+
+feature {NONE} -- Subject
+
+	gpu: SIMPLE_TENSOR
+			-- Facade on this processor's GPU backend.
+		once
+			create Result.make_with_backend (create {VULKAN_BACKEND}.make)
+		end
+
+end

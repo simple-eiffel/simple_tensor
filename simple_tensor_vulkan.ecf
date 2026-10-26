@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<system xmlns="http://www.eiffel.com/developers/xml/configuration/22" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.eiffel.com/developers/xml/configuration/22 http://www.eiffel.com/developers/xml/configuration/22/configuration.xsd" name="simple_tensor_vulkan" uuid="6B2D9F14-3C5E-4A7B-9D8E-2F1A0C3B4D5E" library_target="simple_tensor_vulkan">
+	<description>simple_tensor's GPU backend (Vulkan, M3). Separate from simple_tensor.ecf so CPU users need no Vulkan SDK.</description>
+	<target name="simple_tensor_vulkan">
+		<root all_classes="true"/>
+		<option warning="error" full_class_checking="true" is_obsolete_routine_type="true" void_safety="all">
+			<assertions precondition="true" postcondition="true" invariant="true"/>
+		</option>
+		<setting name="total_order_on_reals" value="true"/>
+		<capability>
+			<concurrency support="scoop"/>
+			<void_safety support="all"/>
+		</capability>
+		<library name="base" location="$ISE_LIBRARY/library/base/base.ecf"/>
+		<library name="simple_tensor" location="$SIMPLE_EIFFEL/simple_tensor/simple_tensor.ecf"/>
+		<library name="simple_vulkan" location="$SIMPLE_EIFFEL/simple_vulkan/simple_vulkan.ecf"/>
+		<library name="simple_shaderc" location="$SIMPLE_EIFFEL/simple_shaderc/simple_shaderc.ecf"/>
+		<cluster name="src_vulkan" location="src_vulkan/" recursive="true"/>
+	</target>
+	<target name="simple_tensor_vulkan_tests" extends="simple_tensor_vulkan">
+		<root class="GPU_TEST_APP" feature="make"/>
+		<option warning="error">
+			<assertions precondition="true" postcondition="true" check="true" invariant="true" loop="true" supplier_precondition="true"/>
+		</option>
+		<setting name="total_order_on_reals" value="true"/>
+		<setting name="console_application" value="true"/>
+		<capability>
+			<concurrency support="scoop" use="scoop"/>
+		</capability>
+		<library name="simple_testing" location="$SIMPLE_EIFFEL/simple_testing/simple_testing.ecf"/>
+		<library name="testing" location="$ISE_LIBRARY/library/testing/testing.ecf"/>
+		<library name="simple_randomizer" location="$SIMPLE_EIFFEL/simple_randomizer/simple_randomizer.ecf"/>
+		<library name="simple_file" location="$SIMPLE_EIFFEL/simple_file/simple_file.ecf"/>
+		<library name="simple_mml" location="$SIMPLE_EIFFEL/simple_mml/simple_mml.ecf"/>
+		<external_library location="psapi.lib"/>
+		<cluster name="tests" location="testing/" recursive="true"/>
+		<cluster name="tests_vulkan" location="testing_vulkan/" recursive="true"/>
+	</target>
+</system>

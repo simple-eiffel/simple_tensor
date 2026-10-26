@@ -703,7 +703,9 @@ feature -- Adversarial (Phase 6)
 				-- A 3-byte file: too short for the length prefix.
 			create l_tiny.make (3)
 			create l_file.make (l_path)
-			check written: l_file.write_block (l_tiny, 3, False) end
+			if not l_file.write_block (l_tiny, 3, False) then
+				assert ("fixture written", False)
+			end
 			assert ("3-byte file: no exception", load_survives (st, l_path))
 			assert ("3-byte file: refused", st.has_error)
 				-- The same reader recovers on a good file.
@@ -987,7 +989,9 @@ feature {NONE} -- Probes
 				i := i + 1
 			end
 			create l_file.make (a_path)
-			check written: l_file.write_block (l_block, l_block.count, False) end
+			if not l_file.write_block (l_block, l_block.count, False) then
+				assert ("fixture written", False)
+			end
 		end
 
 	precondition_fails (a_call: ROUTINE): BOOLEAN
@@ -1114,7 +1118,9 @@ feature {NONE} -- Checkpoint fixtures
 				i := i + 1
 			end
 			create l_file.make (a_path)
-			check written: l_file.write_block (l_block, l_block.count, False) end
+			if not l_file.write_block (l_block, l_block.count, False) then
+				assert ("fixture written", False)
+			end
 		end
 
 feature {NONE} -- Training fixture
