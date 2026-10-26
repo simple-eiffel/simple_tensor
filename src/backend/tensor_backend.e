@@ -356,6 +356,16 @@ feature -- Kernels: fused (memory: one output instead of a chain of temporaries)
 		deferred
 		end
 
+	add_bias (a_out, a_bias: TENSOR_STORAGE; a_rows, a_cols: INTEGER)
+			-- In place: out [r, c] := out [r, c] + bias [c] (a linear layer's epilogue).
+		require
+			owned: owns (a_out) and owns (a_bias)
+			live: not a_out.is_released and not a_bias.is_released
+			sized: a_out.count = a_rows * a_cols and a_bias.count = a_cols
+			distinct: a_out /= a_bias
+		deferred
+		end
+
 	layer_norm (a, a_weight, a_bias, a_out, a_mean, a_rstd: TENSOR_STORAGE; a_rows, a_cols: INTEGER; a_eps: REAL_64)
 			-- Per row: mean, rstd = 1 / sqrt (biased variance + a_eps);
 			-- out = (a - mean) * rstd * weight + bias. Row statistics go to `a_mean', `a_rstd'.

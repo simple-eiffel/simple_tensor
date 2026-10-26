@@ -86,7 +86,7 @@ feature -- Basic operations
 			qkv, q, k, v, a, y: TENSOR
 		do
 			b := x.shape.dim (1); t := x.shape.dim (2); c := dim; h := heads; d := head_dim
-			qkv := x.reshaped (<<b * t, c>>).matmul_transposed (in_proj_weight, False, True) + in_proj_bias
+			qkv := x.reshaped (<<b * t, c>>).linear (in_proj_weight, in_proj_bias)
 			q := split_heads (qkv.sliced (2, 1, c), b, t, h, d)
 			k := split_heads (qkv.sliced (2, c + 1, c), b, t, h, d)
 			v := split_heads (qkv.sliced (2, 2 * c + 1, c), b, t, h, d)

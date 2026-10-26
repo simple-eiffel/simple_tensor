@@ -536,6 +536,61 @@ feature -- Linear algebra
 
 feature -- Neural
 
+	linear (a_weight, a_bias: TENSOR): TENSOR
+			-- Current (rows x in) times a_weight^T (a_weight: out x in) plus a_bias (out), in
+			-- one op: the bias lands in place on the product (no second full-size tensor).
+		require
+			matrix: shape.rank = 2
+			weight_matrix: a_weight.shape.rank = 2 and a_weight.shape.dim (2) = shape.dim (2)
+			bias_vector: a_bias.shape.rank = 1 and a_bias.shape.count = a_weight.shape.dim (1)
+			same_backend: has_same_backend (a_weight) and has_same_backend (a_bias)
+			live: not is_released and not a_weight.is_released and not a_bias.is_released
+		local
+			l_shape: TENSOR_SHAPE
+			l_out: TENSOR_STORAGE
+			l_op: detachable TENSOR_OP
+		do
+			create l_shape.make (<<shape.dim (1), a_weight.shape.dim (1)>>)
+			l_out := backend.new_storage (l_shape.count)
+			backend.matmul (storage, a_weight.storage, l_out, 1, shape.dim (1), shape.dim (2), a_weight.shape.dim (1), False, True, True)
+			backend.add_bias (l_out, a_bias.storage, l_shape.dim (1), l_shape.dim (2))
+			if is_tracked or a_weight.is_tracked or a_bias.is_tracked then
+				create {TENSOR_OP_LINEAR} l_op.make (Current, a_weight, a_bias, l_shape)
+			end
+			create Result.make_result (l_shape, l_out, backend, l_op)
+		ensure
+			shaped: Result.shape.dim (1) = shape.dim (1) and Result.shape.dim (2) = a_weight.shape.dim (1)
+			tracked_iff_any_input_tracked: Result.is_tracked = (is_tracked or a_weight.is_tracked or a_bias.is_tracked)
+			not_a_parameter: not Result.requires_grad
+		end
+
+	dropped (a_keep: REAL_64; a_seed, a_position: NATURAL_64): TENSOR
+			-- Inverted dropout with the Philox keep mask at stream address `a_position' under
+			-- `a_seed' (TENSOR_BACKEND.fill_random): kept elements are scaled by 1 / a_keep.
+			-- The mask is not stored: backward regenerates it. The caller reserves the words
+			-- (TENSOR_RANDOM.skip).
+		require
+			probability: 0.0 < a_keep and a_keep <= 1.0
+			live: not is_released
+		local
+			l_mask, l_out: TENSOR_STORAGE
+			l_op: detachable TENSOR_OP
+		do
+			l_mask := backend.new_storage (shape.count)
+			backend.fill_random (l_mask, backend.Keep_mask_fill_kind, a_keep, 0.0, a_seed, a_position)
+			l_out := backend.new_storage (shape.count)
+			backend.binary (backend.Mul_kind, storage, l_mask, l_out, shape, shape, shape)
+			l_mask.release
+			if is_tracked then
+				create {TENSOR_OP_DROPOUT} l_op.make (Current, a_keep, a_seed, a_position)
+			end
+			create Result.make_result (shape, l_out, backend, l_op)
+		ensure
+			same_shape: Result.shape ~ shape
+			tracked_iff_input_tracked: Result.is_tracked = is_tracked
+			not_a_parameter: not Result.requires_grad
+		end
+
 	causal_softmax (a_scale: REAL_32): TENSOR
 			-- Causal attention weights in one op: the last two axes are T x T scores (query
 			-- rows, key columns); row i gets softmax over keys 0 .. i of a_scale * scores,

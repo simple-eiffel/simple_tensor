@@ -471,6 +471,17 @@ feature -- Kernels: fused
 			gpu (a_out).invalidate
 		end
 
+	add_bias (a_out, a_bias: TENSOR_STORAGE; a_rows, a_cols: INTEGER)
+		local
+			p: VULKAN_PUSH_BLOCK
+		do
+			create p.make
+			p.address (addr (a_out)); p.address (addr (a_bias))
+			p.natural (a_out.count); p.natural (a_cols)
+			run ("add_bias", p, a_out.count)
+			gpu (a_out).invalidate
+		end
+
 	layer_norm (a, a_weight, a_bias, a_out, a_mean, a_rstd: TENSOR_STORAGE; a_rows, a_cols: INTEGER; a_eps: REAL_64)
 		local
 			p: VULKAN_PUSH_BLOCK

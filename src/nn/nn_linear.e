@@ -117,9 +117,10 @@ feature -- Basic operations
 			l_dims: ARRAY [INTEGER]
 		do
 			l_rows := x.shape.count // in_features
-			Result := x.reshaped (<<l_rows, in_features>>).matmul_transposed (weight, False, True)
 			if attached bias as b then
-				Result := Result + b
+				Result := x.reshaped (<<l_rows, in_features>>).linear (weight, b)
+			else
+				Result := x.reshaped (<<l_rows, in_features>>).matmul_transposed (weight, False, True)
 			end
 			l_dims := x.shape.to_array
 			l_dims [l_dims.upper] := out_features

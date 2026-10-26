@@ -1,8 +1,9 @@
 note
 	description: "[
 		Inverted dropout: in training, each element is kept with probability 1 - p and
-		scaled by 1/(1 - p); otherwise the identity. The mask is drawn on the input's own
-		backend (TENSOR_RANDOM.fill_keep_mask: Philox, bit-identical on every backend).
+		scaled by 1/(1 - p); otherwise the identity. The mask is Philox words reserved from
+		the random stream and drawn on the input's backend (TENSOR.dropped): never stored,
+		regenerated in backward, bit-identical on every backend.
 	]"
 	author: "Larry Rix"
 
@@ -41,12 +42,14 @@ feature -- Basic operations
 
 	forward (x: TENSOR): TENSOR
 		local
-			l_mask: TENSOR
+			l_position: NATURAL_64
 		do
 			if is_training and p > 0.0 then
-				l_mask := x.zeros_like
-				random.fill_keep_mask (l_mask, 1.0 - p)
-				Result := x * l_mask
+					-- The same words fill_keep_mask would draw, reserved here and drawn by
+					-- TENSOR.dropped, which regenerates them in backward instead of storing a mask.
+				l_position := random.position
+				random.skip (x.shape.count.to_natural_64)
+				Result := x.dropped (1.0 - p, random.seed.to_natural_64, l_position)
 			else
 				Result := x
 			end

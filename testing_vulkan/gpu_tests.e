@@ -85,6 +85,8 @@ feature -- GPU tests
 			t.compare_named ("fill_random (uniform, normal, keep mask)", agent twin_random)
 			t.compare_named ("causal_softmax (fused) + backward", agent twin_causal_softmax)
 			t.compare_named ("layer_norm (fused) + three gradients", agent twin_layer_norm)
+			t.compare_named ("linear (fused bias) + three gradients", agent twin_linear)
+			t.compare_named ("dropped (regenerated mask) + gradient", agent twin_dropped)
 			print ("      GPU twin parity (cold): worst relative error " + t.worst_relative_error.out + " (" + t.last_report + ")%N")
 			assert ("GPU cold kernels match the oracle within 1e-4 (" + t.last_report + ")", t.within (1.0e-4))
 		end
@@ -254,6 +256,30 @@ feature {NONE} -- Cold-kernel twin cases
 				.concatenated (at.matmul_transposed (bt, True, True).reshaped (<<6300>>), 1)
 				.concatenated (ab.matmul (bb).reshaped (<<18900>>), 1)
 				.concatenated (ab.matmul (b).reshaped (<<18900>>), 1)
+		end
+
+	twin_linear (f: SIMPLE_TENSOR): TENSOR
+		local
+			x, w, b, g, y: TENSOR
+			s: GRAD_STORE
+		do
+			x := f.parameter (seeded (f, <<70, 33>>, -1.0, 1.0, 120))
+			w := f.parameter (seeded (f, <<65, 33>>, -1.0, 1.0, 121))
+			b := f.parameter (seeded (f, <<65>>, -1.0, 1.0, 122))
+			g := seeded (f, <<70, 65>>, -1.0, 1.0, 123)
+			y := x.linear (w, b)
+			s := (y * g).sum_all.backward
+			Result := y.reshaped (<<4550>>).concatenated (s.gradient (x).reshaped (<<2310>>), 1)
+				.concatenated (s.gradient (w).reshaped (<<2145>>), 1).concatenated (s.gradient (b), 1)
+		end
+
+	twin_dropped (f: SIMPLE_TENSOR): TENSOR
+		local
+			x, y: TENSOR
+		do
+			x := f.parameter (seeded (f, <<9, 11>>, -1.0, 1.0, 124))
+			y := x.dropped (0.75, 2027, 12345)
+			Result := y.reshaped (<<99>>).concatenated ((y * y).sum_all.backward.gradient (x).reshaped (<<99>>), 1)
 		end
 
 	twin_causal_softmax (f: SIMPLE_TENSOR): TENSOR

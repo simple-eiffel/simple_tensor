@@ -279,6 +279,17 @@ feature -- Kernels: fused
 			end
 		end
 
+	add_bias (a_out, a_bias: TENSOR_STORAGE; a_rows, a_cols: INTEGER)
+		local
+			i: INTEGER
+		do
+			from i := 0 until i = a_out.count loop
+				a_out.put (a_out.item (i) + a_bias.item (i \\ a_cols), i)
+				i := i + 1
+				pace (i)
+			end
+		end
+
 	layer_norm (a, a_weight, a_bias, a_out, a_mean, a_rstd: TENSOR_STORAGE; a_rows, a_cols: INTEGER; a_eps: REAL_64)
 		local
 			r, c, l_base: INTEGER

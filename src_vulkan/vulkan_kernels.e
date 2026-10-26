@@ -180,7 +180,16 @@ feature {NONE} -- Kernel bodies
 			Result.put (Fill_random, "fill_random")
 			Result.put (Causal_softmax, "causal_softmax")
 			Result.put (Layer_norm, "layer_norm")
+			Result.put (Add_bias, "add_bias")
 		end
+
+	Add_bias: STRING_8 = "[
+		layout(push_constant) uniform P { F o; F bias; uint n; uint cols; } p;
+		void main() {
+			uint i = gid(); if (i >= p.n) return;
+			p.o.v[i] = p.o.v[i] + p.bias.v[i % p.cols];
+		}
+	]"
 
 	Causal_softmax: STRING_8 = "[
 		layout(push_constant) uniform P { F a; F o; uint rows; uint cols; float scale; } p;

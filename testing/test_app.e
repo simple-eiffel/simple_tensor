@@ -67,6 +67,8 @@ feature {NONE} -- Initialization
 			run (agent n.test_nn_dropout, "NN_DROPOUT eval identity and training statistics")
 			run (agent n.test_fused_causal_softmax, "fused causal softmax = scale + mask + softmax")
 			run (agent n.test_fused_layer_norm, "fused layer norm = the composition (values, 3 gradients)")
+			run (agent n.test_fused_linear, "fused linear = matmul + bias (values, 3 gradients)")
+			run (agent n.test_dropout_regenerates_its_mask, "dropout regenerates its mask in backward")
 			print ("%N===================%NResults: " + passed.out + " passed, " + failed.out + " failed%N")
 		end
 

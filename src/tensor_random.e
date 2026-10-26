@@ -53,6 +53,15 @@ feature -- Access
 
 feature -- Basic operations
 
+	skip (n: NATURAL_64)
+			-- Reserve the next `n' words for a caller that draws them itself by address
+			-- (TENSOR.dropped regenerates its mask from (seed, position) in backward).
+		do
+			philox.go_to (philox.position + n)
+		ensure
+			advanced: position = old position + n
+		end
+
 	draw_index (a_upper: INTEGER)
 			-- Draw a uniform integer in 0 .. a_upper - 1 into `last_index' (one word).
 		require

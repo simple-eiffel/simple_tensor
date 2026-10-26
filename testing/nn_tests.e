@@ -251,6 +251,66 @@ feature -- Tests
 			assert ("gradient checks", l_failures.is_empty)
 		end
 
+	test_fused_linear
+			-- linear (w, b) = x W^T + b, values and all three gradients; gradient checks.
+		local
+			r: TENSOR_RANDOM
+			x, w, b, g, ya, yb: TENSOR
+			s1, s2: GRAD_STORE
+			l_failures: ARRAYED_LIST [STRING]
+			l_worst: REAL_64
+		do
+			create r.make (9)
+			x := oracle.parameter (uniform (<<5, 3>>, -1.0, 1.0, r))
+			w := oracle.parameter (uniform (<<4, 3>>, -1.0, 1.0, r))
+			b := oracle.parameter (uniform (<<4>>, -1.0, 1.0, r))
+			g := uniform (<<5, 4>>, -1.0, 1.0, r)
+			ya := x.linear (w, b)
+			yb := x.matmul_transposed (w, False, True) + b
+			s1 := (ya * g).sum_all.backward
+			s2 := (yb * g).sum_all.backward
+			l_worst := max_difference (ya, yb).max (max_difference (s1.gradient (x), s2.gradient (x)))
+				.max (max_difference (s1.gradient (w), s2.gradient (w))).max (max_difference (s1.gradient (b), s2.gradient (b)))
+			print ("      fused linear vs matmul + bias: worst |difference| " + l_worst.out + "%N")
+			assert ("equals the composition", l_worst < 1.0e-6)
+			create l_failures.make (0)
+			grad_check ("linear/x", agent {TENSOR}.linear (w.detached, b.detached), uniform (<<5, 3>>, -1.0, 1.0, r), r, l_failures)
+			grad_check ("linear/weight", agent (x.detached).linear (?, b.detached), uniform (<<4, 3>>, -1.0, 1.0, r), r, l_failures)
+			grad_check ("linear/bias", agent (x.detached).linear (w.detached, ?), uniform (<<4>>, -1.0, 1.0, r), r, l_failures)
+			assert ("gradient checks", l_failures.is_empty)
+		end
+
+	test_dropout_regenerates_its_mask
+			-- dropped (keep, seed, p) = x * the keep mask TENSOR_RANDOM draws at position p; its
+			-- gradient is that same mask (regenerated, not stored); gradient check.
+		local
+			r, r2: TENSOR_RANDOM
+			x, m, y: TENSOR
+			g, mv, yv, xv: ARRAY [REAL_32]
+			l_failures: ARRAYED_LIST [STRING]
+			i: INTEGER
+			l_ok: BOOLEAN
+		do
+			create r.make (10)
+			x := oracle.parameter (uniform (<<6, 7>>, -1.0, 1.0, r))
+			create r2.make (31)
+			r2.skip (500)
+			m := oracle.zeros (<<6, 7>>)
+			r2.fill_keep_mask (m, 0.7)
+			y := x.dropped (0.7, 31, 500)
+			g := (y.sum_all).backward.gradient (x).to_array
+			mv := m.to_array; yv := y.to_array; xv := x.to_array
+			l_ok := True
+			from i := 1 until i > 42 loop
+				l_ok := l_ok and (yv [i] - xv [i] * mv [i]).abs < 1.0e-6 and g [i] = mv [i]
+				i := i + 1
+			end
+			assert ("forward = x * mask, gradient = mask", l_ok)
+			create l_failures.make (0)
+			grad_check ("dropped", agent {TENSOR}.dropped (0.7, 31, 500), uniform (<<6, 7>>, -1.0, 1.0, r), r, l_failures)
+			assert ("gradient check", l_failures.is_empty)
+		end
+
 	test_nn_dropout
 			-- Eval: identity. Training, p = 0.5: values 0 or 2, about half kept, mean near 1.
 		local
