@@ -36,4 +36,10 @@
 		<cluster name="tests" location="testing/" recursive="true"/>
 		<cluster name="tests_vulkan" location="testing_vulkan/" recursive="true"/>
 	</target>
+	<target name="simple_tensor_vulkan_bench" extends="simple_tensor_vulkan">
+		<root class="GPU_BENCH_APP" feature="make"/>
+		<setting name="total_order_on_reals" value="true"/>
+		<setting name="console_application" value="true"/>
+		<cluster name="bench_vulkan" location="bench_vulkan/" recursive="true"/>
+	</target>
 </system>

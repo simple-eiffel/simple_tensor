@@ -57,3 +57,12 @@ GLSL 460 with `GL_EXT_buffer_reference`; all buffer addresses and sizes in push 
 2. ~~Gradient checks on VULKAN_BACKEND~~ WITHDRAWN 2026-10-26: GRADIENT_CHECKER requires the reference backend by design (spec 03 A-S04; autograd is backend-independent). Replaced by cold-kernel twin parity: on CPU the cold kernels are HOST_BACKEND code shared with the oracle, but on the GPU they are new GLSL, so they get their own parity cases.
 3. `fallback_count` = 0 for every kernel a RixGPT training step uses.
 4. A RixGPT-sized step (embedding, attention, MLP, cross-entropy, AdamW) is timed on the GPU against CPU_BACKEND.
+
+## Gate results (2026-10-26)
+1. Twin parity, hot kernels: worst 3.6e-7 (log_softmax). Cold kernels: worst 1.4e-7 (reduce_to_shape). Mutation-checked: a wrong cross-entropy gradient fails hot parity; a wrong permute fails cold parity and training.
+2. Withdrawn (above).
+3. Host fallbacks: 0 across the GPU suite. To re-check on the first RixGPT step (M2).
+4. Lean bench (`bench_vulkan/bench_run_2026-10-26.log`), forward + backward + AdamW, loss read back each step:
+   - 256x768 . 768x768 layer: CPU 37 ms, GPU 4 ms.
+   - 4096x768 -> 3072 -> 768 MLP block: CPU 4,184 ms, GPU 56 ms (about 75x).
+   - 2048^3 matmul through TENSOR: 1,644 GFLOP/s, against 3,616 raw (S-5). The gap is per-tensor overhead: a device allocation plus a zero fill for every result. Next optimization: a device-memory pool, with no zero fill for outputs a kernel writes in full.
