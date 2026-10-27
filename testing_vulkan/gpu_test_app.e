@@ -23,6 +23,7 @@ feature {NONE} -- Initialization
 			run (agent t.test_gpu_keep_mask_bit_identical, "GPU dropout mask bit-identical to the oracle")
 			run (agent t.test_gpu_training_tracks_oracle, "GPU training tracks the oracle")
 			run (agent t.test_gpu_fallback_ledger, "GPU host-fallback ledger")
+			run (agent t.test_gpu_custom_kernel, "GPU client kernel: added, run, output fresh on the host")
 			print ("=======================%NResults: " + passed.out + " passed, " + failed.out + " failed%N")
 		end
 
