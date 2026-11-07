@@ -27,9 +27,11 @@ feature -- Source
 				Result := Matmul_16
 			elseif a_name.same_string ("matmul") then
 				Result := Matmul
+			elseif attached bodies.item (a_name) as b then
+				Result := Header + b
 			else
-				check attached bodies.item (a_name) as b then
-					Result := Header + b
+				check attached client_sources as c and then attached c.item (a_name) as s then
+					Result := s
 				end
 			end
 		end
@@ -38,6 +40,35 @@ feature -- Source
 		do
 			Result := a_name.same_string ("matmul") or a_name.same_string ("matmul_16") or a_name.same_string ("matmul_128")
 				or a_name.same_string ("matmul_coop") or bodies.has (a_name)
+				or (attached client_sources as c and then c.has (a_name))
+		end
+
+	prelude: STRING_8
+			-- The built-in kernels' prelude: version, buffer references F and I, 256-thread
+			-- groups and `gid ()'.
+		do
+			Result := Header
+		end
+
+feature -- Client kernels
+
+	add_client (a_name, a_glsl: STRING_8)
+			-- Make `a_glsl' (a complete compute shader) kernel `a_name'.
+		require
+			new: not has (a_name)
+			named: not a_name.is_empty
+			source: not a_glsl.is_empty
+		local
+			c: like client_sources
+		do
+			c := client_sources
+			if c = Void then
+				create c.make (4)
+				client_sources := c
+			end
+			c.put (a_glsl.twin, a_name.twin)
+		ensure
+			known: has (a_name)
 		end
 
 	needs_vulkan_1_3 (a_name: STRING_8): BOOLEAN
@@ -45,6 +76,11 @@ feature -- Source
 		do
 			Result := a_name.same_string ("matmul_coop")
 		end
+
+feature {NONE} -- Client kernels
+
+	client_sources: detachable HASH_TABLE [STRING_8, STRING_8]
+			-- Kernels added by clients, full GLSL by name.
 
 feature {NONE} -- Shared GLSL
 

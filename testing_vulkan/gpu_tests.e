@@ -409,6 +409,57 @@ feature {NONE} -- Cold-kernel twin cases
 				.concatenated (s.gradient (w), 1).concatenated (s.gradient (b), 1)
 		end
 
+feature -- Custom kernels
+
+	test_gpu_custom_kernel
+			-- A client kernel (y = 2 x + c over n elements) added, run on a 2-D group grid,
+			-- its output read back fresh (the run made the host mirror stale).
+		local
+			x, y: TENSOR
+			p: VULKAN_PUSH_BLOCK
+			i, n: INTEGER
+			ok: BOOLEAN
+		do
+			check attached {VULKAN_BACKEND} gpu.backend as v then
+				if not v.has_kernel ("test_affine") then
+					assert ("built-ins known", v.has_kernel ("matmul") and v.has_kernel ("adamw"))
+					v.add_kernel ("test_affine", v.kernel_header + "[
+						layout(push_constant) uniform P { F x; F y; uint n; float c; } p;
+						void main() { uint i = gid(); if (i < p.n) p.y.v[i] = 2.0 * p.x.v[i] + p.c; }
+					]")
+				end
+				assert ("added", v.has_kernel ("test_affine"))
+				n := 70000
+				x := gpu.from_array (seeded_values (n), <<n>>)
+				y := gpu.zeros (<<n>>)
+				assert ("mirror filled", y.item (5) = 0.0)
+				create p.make
+				p.address (v.storage_address (x.storage)); p.address (v.storage_address (y.storage))
+				p.natural (n); p.real (0.5)
+				v.run_kernel ("test_affine", p, 137, 2, 1, <<y.storage>>)
+				ok := True
+				from i := 0 until i = n loop
+					ok := ok and y.item (i) = 2.0 * x.item (i) + 0.5
+					i := i + 1
+				end
+				assert ("every element", ok)
+			end
+		end
+
+feature {NONE} -- Custom kernel data
+
+	seeded_values (n: INTEGER): ARRAY [REAL_32]
+			-- `n' values in [-8, 8) with exact doubles (multiples of 1/64).
+		local
+			i: INTEGER
+		do
+			create Result.make_filled (0.0, 1, n)
+			from i := 1 until i > n loop
+				Result [i] := ((i * 7919) \\ 1024 - 512).to_real / 64.0
+				i := i + 1
+			end
+		end
+
 feature {NONE} -- Subject
 
 	gpu: SIMPLE_TENSOR

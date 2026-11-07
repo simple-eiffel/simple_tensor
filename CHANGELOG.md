@@ -1,6 +1,10 @@
 # Changelog: simple_tensor
 
 ## Unreleased
+- **Client GPU kernels:** `VULKAN_BACKEND.add_kernel`, `run_kernel`, `storage_address` and `kernel_header`.
+  - A library can add its own GLSL compute kernel and record it into the backend's batch, reading tensors by device address. The storages it writes go stale on the host.
+  - First user: simple_needle's CQ quantization round trip. That is one training step's 100 weight matrices in 31 ms on the GPU, against 3.8 s through the host.
+  - New GPU test (8/8): a client kernel added, run on a 2-D group grid and read back fresh.
 - **GPU backend (M3b), `simple_tensor_vulkan.ecf`:** VULKAN_BACKEND and VULKAN_STORAGE on simple_vulkan 0.4.0.
   - Every kernel is GLSL with device-address push constants, recorded into batches, with buffers recycled through a pool.
   - Hot and cold twin parity against the oracle; 0 host fallbacks. `profile_report` gives the per-kernel GPU time.

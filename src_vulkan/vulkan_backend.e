@@ -742,6 +742,57 @@ feature -- Profiling
 			end
 		end
 
+feature -- Custom kernels
+
+	kernel_header: STRING_8
+			-- GLSL prelude of the built-in kernels (version, buffer references F and I,
+			-- 256-thread groups, `gid ()'), for a client kernel to start from.
+		do
+			Result := kernels.prelude
+		end
+
+	has_kernel (a_name: STRING_8): BOOLEAN
+			-- Is `a_name' a built-in or added kernel?
+		do
+			Result := kernels.has (a_name)
+		end
+
+	add_kernel (a_name, a_glsl: STRING_8)
+			-- Make `a_glsl', a complete compute shader reading its buffers by device address
+			-- in push constants, kernel `a_name' (compiled on its first run).
+		require
+			new: not has_kernel (a_name)
+			named: not a_name.is_empty
+			source: not a_glsl.is_empty
+		do
+			kernels.add_client (a_name, a_glsl)
+		ensure
+			known: has_kernel (a_name)
+		end
+
+	storage_address (s: TENSOR_STORAGE): NATURAL_64
+			-- Device address of `s', for a client kernel's push constants.
+		require
+			owned: owns (s)
+			live: not s.is_released
+		do
+			Result := addr (s)
+		end
+
+	run_kernel (a_name: STRING_8; p: VULKAN_PUSH_BLOCK; gx, gy, gz: INTEGER; a_written: ARRAY [TENSOR_STORAGE])
+			-- Record kernel `a_name' over a `gx' x `gy' x `gz' group grid with push constants
+			-- `p'; every storage in `a_written' (those the kernel writes) goes stale on the host.
+		require
+			known: has_kernel (a_name)
+			grid: gx >= 1 and gy >= 1 and gz >= 1 and gx <= 65535 and gy <= 65535 and gz <= 65535
+			owned: across a_written as s all owns (s) end
+		do
+			run_groups (a_name, p, gx, gy, gz)
+			across a_written as s loop
+				gpu (s).invalidate
+			end
+		end
+
 feature -- Status
 
 	last_record_ok: BOOLEAN

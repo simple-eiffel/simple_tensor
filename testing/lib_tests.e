@@ -1078,22 +1078,17 @@ feature {NONE} -- Probes
 
 	clock_ms: INTEGER_64
 		external
-			"C inline use <windows.h>"
+			"C inline use %"tensor_test_support.h%""
 		alias
-			"LARGE_INTEGER c, f; QueryPerformanceCounter(&c); QueryPerformanceFrequency(&f); return (EIF_INTEGER_64) ((c.QuadPart * 1000) / f.QuadPart);"
+			"return (EIF_INTEGER_64) tts_clock_ms ();"
 		end
 
 	private_mb: INTEGER_64
 			-- Current private (commit) memory of this process, MB.
 		external
-			"C inline use <windows.h>, <psapi.h>"
+			"C inline use %"tensor_test_support.h%""
 		alias
-			"[
-				PROCESS_MEMORY_COUNTERS pmc;
-				pmc.cb = sizeof(pmc);
-				GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
-				return (EIF_INTEGER_64)(pmc.PagefileUsage / (1024 * 1024));
-			]"
+			"return (EIF_INTEGER_64) tts_private_mb ();"
 		end
 
 feature {NONE} -- Checkpoint fixtures
