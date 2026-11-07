@@ -52,9 +52,9 @@ feature {NONE} -- Clock
 
 	now_ms: INTEGER_64
 		external
-			"C inline use <windows.h>"
+			"C inline use %"tensor_test_support.h%""
 		alias
-			"LARGE_INTEGER c, f; QueryPerformanceCounter(&c); QueryPerformanceFrequency(&f); return (EIF_INTEGER_64) ((c.QuadPart * 1000) / f.QuadPart);"
+			"return (EIF_INTEGER_64) tts_clock_ms ();"
 		end
 
 end

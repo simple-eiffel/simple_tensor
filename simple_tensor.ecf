@@ -31,7 +31,12 @@
 		</capability>
 		<library name="simple_testing" location="$SIMPLE_EIFFEL/simple_testing/simple_testing.ecf"/>
 		<library name="testing" location="$ISE_LIBRARY/library/testing/testing.ecf"/>
-		<external_library location="psapi.lib"/>
+		<external_include location="$(SIMPLE_EIFFEL)/simple_tensor/Clib"/>
+		<external_library location="psapi.lib">
+			<condition>
+				<platform value="windows"/>
+			</condition>
+		</external_library>
 		<cluster name="tests" location="testing/" recursive="true"/>
 	</target>
 	<target name="simple_tensor_bench" extends="simple_tensor">
