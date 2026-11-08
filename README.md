@@ -1,5 +1,7 @@
 # simple_tensor
 
+![Windows: tests pass](https://img.shields.io/badge/Windows-tests%20pass-0078D6?logo=windows&logoColor=white) ![Linux: tests pass](https://img.shields.io/badge/Linux-tests%20pass-FCC624?logo=linux&logoColor=black) ![macOS: tests pass](https://img.shields.io/badge/macOS-tests%20pass-000000?logo=apple&logoColor=white)
+
 Tensors, automatic gradients, optimizers and training for Eiffel. Everything is Eiffel: the hot loops are C inline inside Eiffel classes, and every fast kernel has a plain-Eiffel twin that checks it. No Python or outside ML library at run time.
 
 **Status (2026-10-26):** M1 (CPU), M2 and M3 (GPU) are complete. RixGPT, trained from scratch in Eiffel on the GPU, reaches train 1.510 and val 1.242 at step 500, against PyTorch's 1.511 and 1.201 (the M2 gate). The full 5,000 steps end at val 0.807 in f32 and 0.823 with mixed precision, against PyTorch's 0.782 (the M3 gate, ± 0.05). A step takes 317 ms in f32, or 269 ms on the tensor cores.
